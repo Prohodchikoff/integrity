@@ -19,6 +19,19 @@ class PostgresConfig(BaseModel):
     database: str
     schema_name: str = Field("public", alias="schema")
 
+    @computed_field
+    @property
+    def async_url(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.username}:{self.password}"
+            f"@{self.host}:{self.port}/{self.database}"
+        )
+
+    @computed_field
+    @property
+    def url(self) -> str:
+        return self.async_url.replace("postgresql+asyncpg", "postgresql+psycopg")
+
 
 class MySQLConfig(BaseModel):
     type: Literal['mysql'] = 'mysql'
@@ -27,6 +40,16 @@ class MySQLConfig(BaseModel):
     username: str
     password: str = Field(..., repr=False)
     database: str
+
+    @computed_field
+    @property
+    def async_url(self) -> str:
+        return f"mysql+aiomysql://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+    @computed_field
+    @property
+    def url(self) -> str:
+        return self.async_url.replace("mysql+aiomysql", "mysql")
 
 
 DbConfig = Annotated[Union[PostgresConfig, MySQLConfig], Field(discriminator="type")]
