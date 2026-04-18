@@ -1,7 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, status
+from fastapi.exceptions import HTTPException
 from sqlalchemy import text
 from app.settings import get_settings
-from app.core.adapters.sqlalchemy import get_engine
+from app.core.dependecies import DBSessionDep
 
 router = APIRouter()
 
@@ -12,20 +13,11 @@ def config(env_name: str | None = None):
 
     return settings
 
+
 @router.get('/test_connection')
-def test_connection(env_name: str | None = None):
-    engine = get_engine(env_name)
-
-    with engine.connect() as conn:
-        result = conn.execute(text('SELECT version();')).scalar()
-
-    return result
-
-@router.get('/test_connection_async')
-async def test_connection_async(env_name: str | None = None):
-    engine = get_engine(env_name, True)
-
-    async with engine.connect() as conn:
-        result = await conn.execute(text('SELECT version();'))
-
+async def test_connection(db: DBSessionDep):
+    try:
+        result = await db.execute(text('SELECT version();'))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
     return result.scalar()
