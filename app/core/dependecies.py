@@ -1,17 +1,31 @@
-from typing import Annotated
+from typing import Annotated, AsyncGenerator
 from fastapi import Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.database import db_manager
+from app.core.database import DatabaseManager, db_registry
+from app.core.adapters.base import BaseAdapter
+from app.core.adapters.factory import get_adapter
+
+
+def get_db_manager(
+    env_name: str = Query("dev", alias="env"),
+) -> DatabaseManager:
+    return db_registry.get_manager(env_name=env_name)
 
 
 async def get_db(
-    env_name: str = Query("dev", alias="env"),
-):
-
-    await db_manager.init(env_name=env_name)
-
+    db_manager: "DatabaseManagerDep",
+) -> AsyncGenerator[AsyncSession, None]:
     async with db_manager.get_session() as session:
         yield session
 
 
+async def get_db_adapter(
+    db: "DBSessionDep",
+    db_manager: "DatabaseManagerDep",
+) -> BaseAdapter:
+    return get_adapter(session=db, db_type=db_manager.db_type)
+
+
+DatabaseManagerDep = Annotated[DatabaseManager, Depends(get_db_manager)]
 DBSessionDep = Annotated[AsyncSession, Depends(get_db)]
+DBAdapterDep = Annotated[BaseAdapter, Depends(get_db_adapter)]
