@@ -10,3 +10,9 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def execute(self, query: str, params: Optional[dict] = None):
         pass
+
+    @abstractmethod
+    async def create_or_replace_view(
+        self, namespace: str, view_name: str, select_sql: str
+    ) -> None:
+        pass
