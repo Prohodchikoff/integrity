@@ -1,12 +1,22 @@
 import yaml
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+
+class ColumnTestConfig(BaseModel):
+    name: str
+    list_tests: list[str] = Field(default_factory=list, alias="tests")
+
+    model_config = {"populate_by_name": True}
+
+class ModelTestConfig(BaseModel):
+    model: str
+    columns: list[ColumnTestConfig]
 
 class IntegrityProjectFile(BaseModel):
     name: str
     models_dir: str = "models"
-
+    tests: list[ModelTestConfig] = Field(default_factory=list)
 
 def load_project_file(project_root: Path) -> IntegrityProjectFile:
     root = project_root.resolve()

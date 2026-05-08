@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from app.core.adapters.factory import get_adapter
 from app.core.database import db_registry
 from app.integrity.runner import load_project_graph, parse_project, run_project
+from app.integrity.test_runner import run_project_tests
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -81,5 +82,41 @@ async def projects_run(body: ProjectRunBody):
                 "elapsed_ms": m.elapsed_ms,
             }
             for m in result.models
+        ],
+    }
+
+@router.post("/test")
+async def projects_test(body: ProjectRunBody):
+    root = _resolve_project_root(body.project_root)
+
+    manager = db_registry.get_manager(env_name=body.env)
+    async with manager.get_session() as session:
+        adapter = get_adapter(session=session, db_type=manager.db_type)
+        try:
+            result = await run_project_tests(
+                root, adapter, env_name=body.env,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    total = len(result.tests)
+    failed = sum(1 for t in result.tests if not t.ok)
+    passed = total - failed
+    return {
+        "project_name": result.project_name,
+        "summary": {"total": total, "passed": passed, "failed": failed},
+        "tests": [
+            {
+                "test_id": t.test_id,
+                "model": t.model,
+                "column": t.column,
+                "type": t.type,
+                "ok": t.ok,
+                "fail_count": t.fail_count,
+                "error": t.error,
+            }
+            for t in result.tests
         ],
     }
