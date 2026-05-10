@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.adapters.factory import get_adapter
 from app.core.database import db_registry
@@ -25,6 +25,59 @@ class ProjectRunBody(ProjectPathBody):
     )
 
 
+class ParsedModelInfoResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    path: str
+    refs: list[str]
+
+
+class ProjectParseResponse(BaseModel):
+    project_name: str
+    order: list[str]
+    models: list[ParsedModelInfoResponse]
+
+
+class TestSummaryResponse(BaseModel):
+    total: int
+    passed: int
+    failed: int
+
+
+class TestResultItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    test_id: str
+    model: str
+    column: str
+    type: str
+    ok: bool
+    fail_count: int
+    error: str | None = None
+
+
+class ProjectTestsResponse(BaseModel):
+    project_name: str
+    summary: TestSummaryResponse
+    tests: list[TestResultItemResponse]
+
+
+class RunModelResultResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    ok: bool
+    error: str | None = None
+    elapsed_ms: float | None = None
+
+
+class ProjectRunResponse(BaseModel):
+    project_name: str
+    order: list[str]
+    models: list[RunModelResultResponse]
+
+
 def _resolve_project_root(raw: str) -> Path:
     root = Path(raw).expanduser().resolve()
     if not root.is_dir():
@@ -34,7 +87,7 @@ def _resolve_project_root(raw: str) -> Path:
     return root
 
 
-@router.post("/parse")
+@router.post("/parse", response_model=ProjectParseResponse)
 def projects_parse(body: ProjectPathBody):
     root = _resolve_project_root(body.project_root)
     try:
@@ -43,16 +96,14 @@ def projects_parse(body: ProjectPathBody):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {
-        "project_name": r.project_name,
-        "order": list(r.order),
-        "models": [
-            {"name": m.name, "path": m.path, "refs": list(m.refs)} for m in r.models
-        ],
-    }
+    return ProjectParseResponse(
+        project_name=r.project_name,
+        order=list(r.order),
+        models=[ParsedModelInfoResponse.model_validate(m) for m in r.models],
+    )
 
 
-@router.post("/run")
+@router.post("/run", response_model=ProjectRunResponse)
 async def projects_run(body: ProjectRunBody):
     root = _resolve_project_root(body.project_root)
     try:
@@ -74,23 +125,16 @@ async def projects_run(body: ProjectRunBody):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
-    return {
-        "project_name": result.project_name,
-        "order": list(result.order),
-        "models": [
-            {
-                "name": m.name,
-                "ok": m.ok,
-                "error": m.error,
-                "elapsed_ms": m.elapsed_ms,
-            }
-            for m in result.models
-        ],
-    }
+    return ProjectRunResponse(
+        project_name=result.project_name,
+        order=list(result.order),
+        models=[RunModelResultResponse.model_validate(m) for m in result.models],
+    )
 
 @router.post(
     "/test",
     summary="Run integrity tests",
+    response_model=ProjectTestsResponse,
 )
 async def projects_test(body: ProjectRunBody):
     root = _resolve_project_root(body.project_root)
@@ -110,19 +154,8 @@ async def projects_test(body: ProjectRunBody):
     total = len(result.tests)
     failed = sum(1 for t in result.tests if not t.ok)
     passed = total - failed
-    return {
-        "project_name": result.project_name,
-        "summary": {"total": total, "passed": passed, "failed": failed},
-        "tests": [
-            {
-                "test_id": t.test_id,
-                "model": t.model,
-                "column": t.column,
-                "type": t.type,
-                "ok": t.ok,
-                "fail_count": t.fail_count,
-                "error": t.error,
-            }
-            for t in result.tests
-        ],
-    }
+    return ProjectTestsResponse(
+        project_name=result.project_name,
+        summary=TestSummaryResponse(total=total, passed=passed, failed=failed),
+        tests=[TestResultItemResponse.model_validate(t) for t in result.tests],
+    )
