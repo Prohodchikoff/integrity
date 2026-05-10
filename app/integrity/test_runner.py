@@ -5,7 +5,12 @@ from app.core.adapters.base import BaseAdapter
 from app.integrity.project import discover_model_paths, load_project_file
 from app.integrity.relation import quoted_relation
 from app.integrity.runner import execution_namespace
-from app.integrity.test_compiler import build_not_null_sql
+from app.integrity.test_compiler import (
+    build_not_blank_sql,
+    build_not_null_sql,
+    build_positive_sql,
+    build_unique_sql,
+)
 from app.settings import get_settings
 
 
@@ -38,6 +43,12 @@ def _build_test_sql(test_type: str, relation: str, column: str, db_type: str) ->
     quoted_column = _quote_column(db_type, column)
     if test_type == "not_null":
         return build_not_null_sql(relation, quoted_column)
+    if test_type == "unique":
+        return build_unique_sql(relation, quoted_column, db_type)
+    if test_type == "not_blank":
+        return build_not_blank_sql(relation, quoted_column)
+    if test_type == "positive":
+        return build_positive_sql(relation, quoted_column)
     raise ValueError(f"Unsupported test type: {test_type}")
 
 
