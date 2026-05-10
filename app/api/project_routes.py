@@ -19,7 +19,10 @@ class ProjectPathBody(BaseModel):
 
 
 class ProjectRunBody(ProjectPathBody):
-    env: str = "dev"
+    env: str = Field(
+        "dev",
+        description="Environment profile from app/config/environments.yaml (database connection).",
+    )
 
 
 def _resolve_project_root(raw: str) -> Path:
@@ -85,7 +88,10 @@ async def projects_run(body: ProjectRunBody):
         ],
     }
 
-@router.post("/test")
+@router.post(
+    "/test",
+    summary="Run integrity tests",
+)
 async def projects_test(body: ProjectRunBody):
     root = _resolve_project_root(body.project_root)
 

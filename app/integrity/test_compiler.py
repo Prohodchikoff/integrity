@@ -1,3 +1,23 @@
+from jinja2 import StrictUndefined, Template
+
+
+def render_user_test(
+    template: str,
+    *,
+    relation: str,
+    column: str,
+    column_name: str,
+    db_type: str,
+) -> str:
+    """Render custom test SQL; placeholders: relation, column (quoted id), column_name, db_type."""
+    return Template(template, undefined=StrictUndefined).render(
+        relation=relation,
+        column=column,
+        column_name=column_name,
+        db_type=db_type,
+    ).strip()
+
+
 def build_not_null_sql(relation: str, column: str) -> str:
     stmt = f"""
     SELECT * FROM {relation} WHERE {column} IS NULL

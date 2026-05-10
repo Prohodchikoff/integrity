@@ -2,7 +2,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.adapters.base import BaseAdapter
-from app.integrity.project import discover_model_paths, load_project_file
+from app.integrity.project import (
+    BUILTIN_INTEGRITY_TESTS,
+    discover_model_paths,
+    load_project_file,
+)
 from app.integrity.relation import quoted_relation
 from app.integrity.runner import execution_namespace
 from app.integrity.test_compiler import (
@@ -10,6 +14,7 @@ from app.integrity.test_compiler import (
     build_not_null_sql,
     build_positive_sql,
     build_unique_sql,
+    render_user_test,
 )
 from app.settings import get_settings
 
@@ -39,7 +44,24 @@ def _quote_column(db_type: str, column: str) -> str:
     raise ValueError(f"Unsupported db_type for column quoting: {db_type!r}")
 
 
-def _build_test_sql(test_type: str, relation: str, column: str, db_type: str) -> str:
+def _resolve_test_file(root: Path, tests_dir: str, ref: str) -> Path:
+    base = (root / tests_dir).resolve()
+    candidate = (base / ref).with_suffix(".sql").resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as e:
+        raise ValueError(
+            f"SQL test path {ref!r} resolves outside {tests_dir!r}"
+        ) from e
+    if not candidate.is_file():
+        raise FileNotFoundError(
+            f"SQL test file not found: {candidate} "
+            f"(expected under {base})"
+        )
+    return candidate
+
+
+def _build_builtin_sql(test_type: str, relation: str, column: str, db_type: str) -> str:
     quoted_column = _quote_column(db_type, column)
     if test_type == "not_null":
         return build_not_null_sql(relation, quoted_column)
@@ -77,11 +99,45 @@ async def run_project_tests(
 
         for column_cfg in model_cfg.columns:
             column_name = column_cfg.name
-            for test_type in column_cfg.list_tests:
-                test_id = f"{model_name}.{column_name}.{test_type}"
+            for test_name in column_cfg.list_tests:
+                type_label = test_name
+                test_id = f"{model_name}.{column_name}.{test_name}"
                 try:
-                    sql = _build_test_sql(test_type, relation, column_name, db_type)
-                    count_stmt = f"SELECT COUNT(*) FROM ({sql}) AS integrity_test_failures"
+                    if test_name in BUILTIN_INTEGRITY_TESTS:
+                        sql = _build_builtin_sql(
+                            test_name, relation, column_name, db_type
+                        )
+                    else:
+                        path = _resolve_test_file(
+                            root, project.tests_dir, test_name
+                        )
+                        raw_tpl = path.read_text(encoding="utf-8")
+                        quoted = _quote_column(db_type, column_name)
+                        sql = render_user_test(
+                            raw_tpl,
+                            relation=relation,
+                            column=quoted,
+                            column_name=column_name,
+                            db_type=db_type,
+                        )
+                except Exception as exc:
+                    results.append(
+                        TestResult(
+                            test_id=test_id,
+                            model=model_name,
+                            column=column_name,
+                            type=type_label,
+                            ok=False,
+                            fail_count=0,
+                            error=str(exc),
+                        )
+                    )
+                    continue
+
+                try:
+                    count_stmt = (
+                        f"SELECT COUNT(*) FROM ({sql}) AS integrity_test_failures"
+                    )
                     count_result = await adapter.execute(count_stmt)
                     fail_count = int(count_result.scalar_one())
                     results.append(
@@ -89,7 +145,7 @@ async def run_project_tests(
                             test_id=test_id,
                             model=model_name,
                             column=column_name,
-                            type=test_type,
+                            type=type_label,
                             ok=fail_count == 0,
                             fail_count=fail_count,
                             error=None,
@@ -101,7 +157,7 @@ async def run_project_tests(
                             test_id=test_id,
                             model=model_name,
                             column=column_name,
-                            type=test_type,
+                            type=type_label,
                             ok=False,
                             fail_count=0,
                             error=str(exc),
