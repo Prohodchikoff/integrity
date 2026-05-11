@@ -102,7 +102,7 @@ class EnvironmentConfig(BaseModel):
     def inject_type(cls, data: Any):
         if isinstance(data, dict):
             conn = data.get("connection") or data.get("db")
-            if isьinstance(conn, dict) and "type" not in conn:
+            if isinstance(conn, dict) and "type" not in conn:
                 conn = dict(conn)
                 conn["type"] = data.get("type")
                 data = dict(data)

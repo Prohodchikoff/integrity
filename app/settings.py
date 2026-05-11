@@ -4,7 +4,7 @@ import os
 import yaml
 from pydantic import BaseModel, Field
 
-from app.core import EnvironmentConfig
+from app.core.config import EnvironmentConfig
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -30,7 +30,7 @@ class ProjectSettings(BaseModel):
     project_root: str | None = Field(
         default=None,
         description="Path to project root with integrity.yml. Relative paths are resolved from app/.",
-    )ь
+    )
     default_environment: str | None = None
     environments: dict[str, EnvironmentConfig] = Field(
         ...,

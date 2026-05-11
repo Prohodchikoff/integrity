@@ -20,6 +20,16 @@ class SqlalchemyAdapter(BaseAdapter):
             stmt = f'CREATE OR REPLACE VIEW "{namespace}"."{view_name}" AS\n{select_sql}'
         elif dialect in ("mysql", "mariadb"):
             stmt = f"CREATE OR REPLACE VIEW `{namespace}`.`{view_name}` AS\n{select_sql}"
+        elif dialect in ("mssql",):
+            stmt = (
+                f"CREATE OR ALTER VIEW [{namespace}].[{view_name}] AS\n{select_sql}"
+            )
+        elif dialect in ("clickhouse", "duckdb", "trino", "redshift", "snowflake"):
+            stmt = f'CREATE OR REPLACE VIEW "{namespace}"."{view_name}" AS\n{select_sql}'
+        elif dialect in ("bigquery",):
+            stmt = (
+                f"CREATE OR REPLACE VIEW `{namespace}.{view_name}` AS\n{select_sql}"
+            )
         else:
             raise NotImplementedError(f"Unsupported dialect for views: {dialect}")
         await self.execute(stmt)
