@@ -1,77 +1,14 @@
 from pathlib import Path
-from typing import Literal, Any, Annotated, Union
 from functools import lru_cache
 import os
 import yaml
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field
+
+from app.core import EnvironmentConfig
 
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config" / "environments.yaml"
-
-
-class PostgresConfig(BaseModel):
-    type: Literal['postgresql'] = 'postgresql'
-    host: str
-    port: int = 5432
-    username: str
-    password: str = Field(..., repr=False)
-    database: str
-    schema_name: str = Field("public", alias="schema")
-
-    @computed_field
-    @property
-    def async_url(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.username}:{self.password}"
-            f"@{self.host}:{self.port}/{self.database}"
-        )
-
-    @computed_field
-    @property
-    def url(self) -> str:
-        return self.async_url.replace("postgresql+asyncpg", "postgresql+psycopg")
-
-
-class MySQLConfig(BaseModel):
-    type: Literal['mysql'] = 'mysql'
-    host: str
-    port: int = 3306
-    username: str
-    password: str = Field(..., repr=False)
-    database: str
-
-    @computed_field
-    @property
-    def async_url(self) -> str:
-        return f"mysql+aiomysql://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
-
-    @computed_field
-    @property
-    def url(self) -> str:
-        return self.async_url.replace("mysql+aiomysql", "mysql")
-
-
-DbConfig = Annotated[Union[PostgresConfig, MySQLConfig], Field(discriminator="type")]
-
-
-class EnvironmentConfig(BaseModel):
-    type: Literal["postgresql", "mysql"]
-    connection: dict[str, Any]
-
-    db: DbConfig = Field(..., alias="connection")
-
-    @model_validator(mode="before")
-    @classmethod
-    def inject_type(cls, data: Any):
-        if isinstance(data, dict):
-            conn = data.get("connection") or data.get("db")
-            if isinstance(conn, dict) and "type" not in conn:
-                conn = dict(conn)
-                conn["type"] = data.get("type")
-                data = dict(data)
-                data["connection"] = conn
-        return data
 
 
 class Settings(BaseModel):
@@ -93,7 +30,7 @@ class ProjectSettings(BaseModel):
     project_root: str | None = Field(
         default=None,
         description="Path to project root with integrity.yml. Relative paths are resolved from app/.",
-    )
+    )ь
     default_environment: str | None = None
     environments: dict[str, EnvironmentConfig] = Field(
         ...,
