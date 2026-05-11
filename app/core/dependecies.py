@@ -7,9 +7,10 @@ from app.core.adapters.factory import get_adapter
 
 
 def get_db_manager(
-    env_name: str = Query("dev", alias="env"),
+    project_name: str = Query(..., alias="project"),
+    env_name: str | None = Query(None, alias="env"),
 ) -> DatabaseManager:
-    return db_registry.get_manager(env_name=env_name)
+    return db_registry.get_manager(project_name=project_name, env_name=env_name)
 
 
 async def get_db(

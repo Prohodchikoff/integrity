@@ -75,6 +75,8 @@ class EnvironmentConfig(BaseModel):
 
 
 class Settings(BaseModel):
+    project_name: str
+    project_root: Path
     environment: str = "dev"
     config: EnvironmentConfig
 
@@ -87,14 +89,71 @@ class Settings(BaseModel):
         return getattr(self.db_config, "dsn", None)
 
 
+class ProjectSettings(BaseModel):
+    project_root: str | None = Field(
+        default=None,
+        description="Path to project root with integrity.yml. Relative paths are resolved from app/.",
+    )
+    default_environment: str | None = None
+    environments: dict[str, EnvironmentConfig] = Field(
+        ...,
+        validation_alias="environment",
+    )
+
+    def resolve_project_root(self, project_name: str) -> Path:
+        if self.project_root:
+            root = Path(self.project_root)
+            if not root.is_absolute():
+                root = (BASE_DIR / root).resolve()
+            return root
+        return (BASE_DIR / "config" / project_name).resolve()
+
+    def resolve_environment(self, env_name: str | None) -> str:
+        if env_name:
+            return env_name
+        if self.default_environment:
+            return self.default_environment
+        if self.environments:
+            return next(iter(self.environments))
+        raise ValueError("Project has no configured environments")
+
+
+class ConfigFile(BaseModel):
+    projects: dict[str, ProjectSettings]
+
+
+@lru_cache(maxsize=1)
+def get_config() -> ConfigFile:
+    data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    return ConfigFile.model_validate(data)
+
+
+def list_projects() -> list[str]:
+    return sorted(get_config().projects.keys())
+
+
 @lru_cache
-def get_settings(env_name: str | None = None) -> Settings:
-    current_env = env_name or os.getenv("ENVIRONMENT", "dev")
+def get_settings(
+    project_name: str,
+    env_name: str | None = None,
+) -> Settings:
+    config = get_config()
+    project = config.projects.get(project_name)
+    if not project:
+        raise ValueError(f"Project {project_name!r} not found")
 
-    data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-    env_data = data["environments"].get(current_env)
-
+    current_env = project.resolve_environment(env_name or os.getenv("ENVIRONMENT"))
+    env_data = project.environments.get(current_env)
     if not env_data:
-        raise ValueError(f"Environment {current_env} not found")
+        raise ValueError(
+            f"Environment {current_env!r} not found for project {project_name!r}"
+        )
 
-    return Settings.model_validate({"environment": current_env, "config": env_data})
+    return Settings.model_validate(
+        {
+            "project_name": project_name,
+            "project_root": project.resolve_project_root(project_name),
+            "environment": current_env,
+            "config": env_data,
+        }
+    )

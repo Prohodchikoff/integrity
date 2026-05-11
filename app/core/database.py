@@ -14,8 +14,13 @@ logger = logging.getLogger("uvicorn.error")
 
 
 class DatabaseManager:
-    def __init__(self, env_name: Optional[str] = None):
-        settings = get_settings(env_name=env_name)
+    def __init__(
+        self,
+        project_name: str,
+        env_name: Optional[str] = None,
+    ):
+        settings = get_settings(env_name=env_name, project_name=project_name)
+        self._project_name: str = settings.project_name
         self._environment: str = settings.environment
         self._db_type: str = settings.db_config.type
 
@@ -48,6 +53,10 @@ class DatabaseManager:
             await self._engine.dispose()
             self._engine = None
             self._sessionmaker = None
+
+    @property
+    def project_name(self) -> str:
+        return self._project_name
 
     @property
     def environment(self) -> str:
@@ -106,14 +115,23 @@ class DatabaseRegistry:
     def __init__(self):
         self._managers: dict[str, DatabaseManager] = {}
 
-    def get_manager(self, env_name: Optional[str] = None) -> DatabaseManager:
-        settings = get_settings(env_name=env_name)
+    def get_manager(
+        self,
+        project_name: str,
+        env_name: Optional[str] = None,
+    ) -> DatabaseManager:
+        settings = get_settings(env_name=env_name, project_name=project_name)
+        project = settings.project_name
         environment = settings.environment
+        manager_key = f"{project}:{environment}"
 
-        if environment not in self._managers:
-            self._managers[environment] = DatabaseManager(env_name=environment)
+        if manager_key not in self._managers:
+            self._managers[manager_key] = DatabaseManager(
+                env_name=environment,
+                project_name=project,
+            )
 
-        return self._managers[environment]
+        return self._managers[manager_key]
 
     async def close_all(self) -> None:
         for manager in self._managers.values():

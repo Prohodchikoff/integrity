@@ -105,10 +105,11 @@ async def run_project(
     project_root: Path,
     adapter: BaseAdapter,
     env_name: str | None = None,
+    project_name: str | None = None,
     *,
     _loaded: LoadedProject | None = None,
 ) -> RunResult:
-    settings = get_settings(env_name)
+    settings = get_settings(env_name=env_name, project_name=project_name)
     db_type = settings.db_config.type
     namespace = execution_namespace(settings)
 

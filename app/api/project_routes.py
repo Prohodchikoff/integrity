@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -7,21 +5,22 @@ from app.core.adapters.factory import get_adapter
 from app.core.database import db_registry
 from app.integrity.runner import load_project_graph, parse_project, run_project
 from app.integrity.test_runner import run_project_tests
+from app.settings import get_settings
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 class ProjectPathBody(BaseModel):
-    project_root: str = Field(
+    project_name: str = Field(
         ...,
-        description="Absolute path to a directory containing integrity.yml",
+        description="Project name from app/config/environments.yaml -> projects.*",
     )
 
 
 class ProjectRunBody(ProjectPathBody):
-    env: str = Field(
-        "dev",
-        description="Environment profile from app/config/environments.yaml (database connection).",
+    env: str | None = Field(
+        default=None,
+        description="Environment profile from app/config/environments.yaml (if omitted, project's default_environment is used).",
     )
 
 
@@ -78,18 +77,16 @@ class ProjectRunResponse(BaseModel):
     models: list[RunModelResultResponse]
 
 
-def _resolve_project_root(raw: str) -> Path:
-    root = Path(raw).expanduser().resolve()
+def _resolve_project_root(project_name: str):
+    root = get_settings(project_name=project_name).project_root
     if not root.is_dir():
-        raise HTTPException(
-            status_code=400, detail=f"project_root is not a directory: {root}"
-        )
+        raise HTTPException(status_code=400, detail=f"Project directory not found: {root}")
     return root
 
 
 @router.post("/parse", response_model=ProjectParseResponse)
 def projects_parse(body: ProjectPathBody):
-    root = _resolve_project_root(body.project_root)
+    root = _resolve_project_root(body.project_name)
     try:
         r = parse_project(root)
     except FileNotFoundError as e:
@@ -105,7 +102,7 @@ def projects_parse(body: ProjectPathBody):
 
 @router.post("/run", response_model=ProjectRunResponse)
 async def projects_run(body: ProjectRunBody):
-    root = _resolve_project_root(body.project_root)
+    root = _resolve_project_root(body.project_name)
     try:
         loaded = load_project_graph(root)
     except FileNotFoundError as e:
@@ -113,12 +110,19 @@ async def projects_run(body: ProjectRunBody):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    manager = db_registry.get_manager(env_name=body.env)
+    manager = db_registry.get_manager(
+        env_name=body.env,
+        project_name=body.project_name,
+    )
     async with manager.get_session() as session:
         adapter = get_adapter(session=session, db_type=manager.db_type)
         try:
             result = await run_project(
-                root, adapter, env_name=body.env, _loaded=loaded
+                root,
+                adapter,
+                env_name=body.env,
+                project_name=body.project_name,
+                _loaded=loaded,
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -137,14 +141,20 @@ async def projects_run(body: ProjectRunBody):
     response_model=ProjectTestsResponse,
 )
 async def projects_test(body: ProjectRunBody):
-    root = _resolve_project_root(body.project_root)
+    root = _resolve_project_root(body.project_name)
 
-    manager = db_registry.get_manager(env_name=body.env)
+    manager = db_registry.get_manager(
+        env_name=body.env,
+        project_name=body.project_name,
+    )
     async with manager.get_session() as session:
         adapter = get_adapter(session=session, db_type=manager.db_type)
         try:
             result = await run_project_tests(
-                root, adapter, env_name=body.env,
+                root,
+                adapter,
+                env_name=body.env,
+                project_name=body.project_name,
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e

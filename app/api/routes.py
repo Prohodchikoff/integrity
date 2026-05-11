@@ -1,17 +1,22 @@
 from fastapi import APIRouter, status
 from fastapi.exceptions import HTTPException
 from sqlalchemy import text
-from app.settings import get_settings
+from app.settings import get_settings, list_projects
 from app.core.dependecies import DBSessionDep, DBAdapterDep
 
 router = APIRouter()
 
 
 @router.get('/config')
-def config(env_name: str | None = None):
-    settings = get_settings(env_name)
+def config(project_name: str, env_name: str | None = None):
+    settings = get_settings(env_name=env_name, project_name=project_name)
 
     return settings
+
+
+@router.get("/projects")
+def projects():
+    return {"projects": list_projects()}
 
 
 @router.get('/test_connection')
