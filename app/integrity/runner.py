@@ -1,6 +1,7 @@
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from app.core.adapters.base import BaseAdapter
 from app.integrity.compiler import compile_sql
@@ -109,6 +110,7 @@ async def run_project(
     adapter: BaseAdapter,
     env_name: str | None = None,
     project_name: str | None = None,
+    on_model_result: Callable[[RunModelResult], Awaitable[None] | None] | None = None,
     *,
     _loaded: LoadedProject | None = None,
 ) -> RunResult:
@@ -142,6 +144,10 @@ async def run_project(
                     elapsed_ms=round(elapsed_ms, 2),
                 )
             )
+            if on_model_result:
+                maybe = on_model_result(results[-1])
+                if maybe is not None:
+                    await maybe
             break
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -153,6 +159,10 @@ async def run_project(
                 elapsed_ms=round(elapsed_ms, 2),
             )
         )
+        if on_model_result:
+            maybe = on_model_result(results[-1])
+            if maybe is not None:
+                await maybe
 
     return RunResult(
         project_name=loaded.project_name, order=order, models=tuple(results)

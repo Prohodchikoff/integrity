@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from app.core.adapters.base import BaseAdapter
 from app.integrity.project import (
@@ -79,6 +80,7 @@ async def run_project_tests(
     adapter: BaseAdapter,
     env_name: str | None = None,
     project_name: str | None = None,
+    on_test_result: Callable[[TestResult], Awaitable[None] | None] | None = None,
 ) -> TestRunResult:
     root = project_root.resolve()
     settings = get_settings(env_name=env_name, project_name=project_name)
@@ -133,6 +135,10 @@ async def run_project_tests(
                             error=str(exc),
                         )
                     )
+                    if on_test_result:
+                        maybe = on_test_result(results[-1])
+                        if maybe is not None:
+                            await maybe
                     continue
 
                 try:
@@ -152,6 +158,10 @@ async def run_project_tests(
                             error=None,
                         )
                     )
+                    if on_test_result:
+                        maybe = on_test_result(results[-1])
+                        if maybe is not None:
+                            await maybe
                 except Exception as exc:
                     results.append(
                         TestResult(
@@ -164,5 +174,9 @@ async def run_project_tests(
                             error=str(exc),
                         )
                     )
+                    if on_test_result:
+                        maybe = on_test_result(results[-1])
+                        if maybe is not None:
+                            await maybe
 
     return TestRunResult(project_name=project.name, tests=tuple(results))

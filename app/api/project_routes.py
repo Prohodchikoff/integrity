@@ -1,92 +1,25 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from app.core.adapters.factory import get_adapter
-from app.core.database import db_registry
-from app.integrity.runner import load_project_graph, parse_project, run_project
-from app.integrity.test_runner import run_project_tests
-from app.settings import get_settings
+from app.api.project_helpers import resolve_project_root
+from app.api.project_jobs import execute_run, execute_test, get_job, schedule_background_job
+from app.api.project_models import (
+    ParsedModelInfoResponse,
+    ProjectJobAcceptedResponse,
+    ProjectJobStatusResponse,
+    ProjectParseResponse,
+    ProjectPathBody,
+    ProjectRunBody,
+    ProjectRunResponse,
+    ProjectTestsResponse,
+)
+from app.integrity.runner import parse_project
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-class ProjectPathBody(BaseModel):
-    project_name: str = Field(
-        ...,
-        description="Project name from app/config/environments.yaml -> projects.*",
-    )
-
-
-class ProjectRunBody(ProjectPathBody):
-    env: str | None = Field(
-        default=None,
-        description="Environment profile from app/config/environments.yaml (if omitted, project's default_environment is used).",
-    )
-
-
-class ParsedModelInfoResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str
-    path: str
-    refs: list[str]
-
-
-class ProjectParseResponse(BaseModel):
-    project_name: str
-    order: list[str]
-    models: list[ParsedModelInfoResponse]
-
-
-class TestSummaryResponse(BaseModel):
-    total: int
-    passed: int
-    failed: int
-
-
-class TestResultItemResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    test_id: str
-    model: str
-    column: str
-    type: str
-    ok: bool
-    fail_count: int
-    error: str | None = None
-
-
-class ProjectTestsResponse(BaseModel):
-    project_name: str
-    summary: TestSummaryResponse
-    tests: list[TestResultItemResponse]
-
-
-class RunModelResultResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    name: str
-    ok: bool
-    error: str | None = None
-    elapsed_ms: float | None = None
-
-
-class ProjectRunResponse(BaseModel):
-    project_name: str
-    order: list[str]
-    models: list[RunModelResultResponse]
-
-
-def _resolve_project_root(project_name: str):
-    root = get_settings(project_name=project_name).project_root
-    if not root.is_dir():
-        raise HTTPException(status_code=400, detail=f"Project directory not found: {root}")
-    return root
-
-
 @router.post("/parse", response_model=ProjectParseResponse)
 def projects_parse(body: ProjectPathBody):
-    root = _resolve_project_root(body.project_name)
+    root = resolve_project_root(body.project_name)
     try:
         r = parse_project(root)
     except FileNotFoundError as e:
@@ -102,38 +35,12 @@ def projects_parse(body: ProjectPathBody):
 
 @router.post("/run", response_model=ProjectRunResponse)
 async def projects_run(body: ProjectRunBody):
-    root = _resolve_project_root(body.project_name)
-    try:
-        loaded = load_project_graph(root)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return await execute_run(body)
 
-    manager = db_registry.get_manager(
-        env_name=body.env,
-        project_name=body.project_name,
-    )
-    async with manager.get_session() as session:
-        adapter = get_adapter(session=session, db_type=manager.db_type)
-        try:
-            result = await run_project(
-                root,
-                adapter,
-                env_name=body.env,
-                project_name=body.project_name,
-                _loaded=loaded,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
 
-    return ProjectRunResponse(
-        project_name=result.project_name,
-        order=list(result.order),
-        models=[RunModelResultResponse.model_validate(m) for m in result.models],
-    )
+@router.post("/run_async", response_model=ProjectJobAcceptedResponse)
+async def projects_run_async(body: ProjectRunBody, background_tasks: BackgroundTasks):
+    return schedule_background_job(background_tasks, "run", body)
 
 @router.post(
     "/test",
@@ -141,31 +48,14 @@ async def projects_run(body: ProjectRunBody):
     response_model=ProjectTestsResponse,
 )
 async def projects_test(body: ProjectRunBody):
-    root = _resolve_project_root(body.project_name)
+    return await execute_test(body)
 
-    manager = db_registry.get_manager(
-        env_name=body.env,
-        project_name=body.project_name,
-    )
-    async with manager.get_session() as session:
-        adapter = get_adapter(session=session, db_type=manager.db_type)
-        try:
-            result = await run_project_tests(
-                root,
-                adapter,
-                env_name=body.env,
-                project_name=body.project_name,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
 
-    total = len(result.tests)
-    failed = sum(1 for t in result.tests if not t.ok)
-    passed = total - failed
-    return ProjectTestsResponse(
-        project_name=result.project_name,
-        summary=TestSummaryResponse(total=total, passed=passed, failed=failed),
-        tests=[TestResultItemResponse.model_validate(t) for t in result.tests],
-    )
+@router.post("/test_async", response_model=ProjectJobAcceptedResponse)
+async def projects_test_async(body: ProjectRunBody, background_tasks: BackgroundTasks):
+    return schedule_background_job(background_tasks, "test", body)
+
+
+@router.get("/jobs/{job_id}", response_model=ProjectJobStatusResponse)
+async def projects_job_status(job_id: str):
+    return get_job(job_id)
