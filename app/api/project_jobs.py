@@ -98,7 +98,17 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
         project_name=body.project_name,
     )
     async with manager.get_session() as session:
-        adapter = get_adapter(session=session, db_type=manager.db_type)
+        cfg = manager.db_config
+        adapter = get_adapter(
+            db_type=manager.db_type,
+            session=session,
+            host=cfg.host,
+            port=cfg.port,
+            username=cfg.username,
+            password=cfg.password,
+            database=cfg.database,
+        ) 
+        # adapter = get_adapter(session=session, db_type=manager.db_type)
 
         async def _on_model_result(item):
             if not job_id:
@@ -143,7 +153,16 @@ async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> Proje
         project_name=body.project_name,
     )
     async with manager.get_session() as session:
-        adapter = get_adapter(session=session, db_type=manager.db_type)
+        cfg = manager.db_config
+        adapter = get_adapter(
+            db_type=manager.db_type,
+            session=session,
+            host=cfg.host,
+            port=cfg.port,
+            username=cfg.username,
+            password=cfg.password,
+            database=cfg.database,
+        )
 
         async def _on_test_result(item):
             if not job_id:

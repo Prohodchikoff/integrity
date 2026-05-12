@@ -38,9 +38,10 @@ class TestRunResult:
 
 
 def _quote_column(db_type: str, column: str) -> str:
-    if db_type == "postgresql":
+    if db_type in {"postgresql", "redshift", "snowflake", "bigquery",
+                   "duckdb", "trino", "oracle", "mssql"}:
         return f'"{column}"'
-    if db_type == "mysql":
+    if db_type in {"mysql", "mariadb", "clickhouse"}:
         return f"`{column}`"
     raise ValueError(f"Unsupported db_type for column quoting: {db_type!r}")
 
@@ -69,7 +70,7 @@ def _build_builtin_sql(test_type: str, relation: str, column: str, db_type: str)
     if test_type == "unique":
         return build_unique_sql(relation, quoted_column, db_type)
     if test_type == "not_blank":
-        return build_not_blank_sql(relation, quoted_column)
+        return build_not_blank_sql(relation, quoted_column, db_type)
     if test_type == "positive":
         return build_positive_sql(relation, quoted_column)
     raise ValueError(f"Unsupported test type: {test_type}")

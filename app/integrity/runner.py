@@ -52,9 +52,10 @@ class RunResult:
 def execution_namespace(settings: Settings) -> str:
     db = settings.db_config
     kind = db.type.strip().lower()
-    if kind in {"postgresql", "mssql", "clickhouse", "duckdb", "trino", "oracle"}:
+
+    if kind in {"postgresql", "mssql", "duckdb", "trino", "oracle"}:
         return db.schema_name or "public"
-    if kind in {"mysql", "mariadb", "redshift", "snowflake", "bigquery"}:
+    if kind in {"mysql", "mariadb", "clickhouse", "redshift", "snowflake", "bigquery"}:
         if db.database:
             return db.database
         raise ValueError(f"Database name is required for database type: {db.type!r}")

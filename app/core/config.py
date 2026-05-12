@@ -8,7 +8,7 @@ DEFAULT_SYNC_DRIVERS: dict[str, str] = {
     "mysql": "pymysql",
     "mariadb": "pymysql",
     "mssql": "pyodbc",
-    "clickhouse": "http",
+    "clickhouse": "connect",
     "duckdb": "duckdb_engine",
     "oracle": "oracledb",
     "bigquery": "pybigquery",
@@ -21,7 +21,7 @@ DEFAULT_ASYNC_DRIVERS: dict[str, str] = {
     "postgresql": "asyncpg",
     "mysql": "aiomysql",
     "mssql": "aioodbc",
-    "clickhouse": "asynch",
+    # "clickhouse": "asynch",
 }
 
 

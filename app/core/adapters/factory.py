@@ -1,28 +1,40 @@
-from .base import BaseAdapter
-from .sqlalchemy_base import SqlalchemyAdapter
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .base import BaseAdapter
+from .sqlalchemy_base import SqlalchemyAdapter
+from .clickhouse import ClickHouseAdapter
 
-def get_adapter(session: AsyncSession, db_type: str) -> BaseAdapter:
 
+_SQLALCHEMY_ADAPTERS = {
+    "postgresql", "mysql", "mariadb", "mssql",
+    "duckdb", "bigquery", "oracle", "trino",
+    "redshift", "snowflake",
+}
+
+def get_adapter(
+    db_type: str,
+    session: Optional[AsyncSession] = None,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    database: Optional[str] = None,
+) -> BaseAdapter:
     db_kind = db_type.strip().lower()
-    adapters = {
-        "postgresql": SqlalchemyAdapter,
-        "mysql": SqlalchemyAdapter,
-        "mariadb": SqlalchemyAdapter,
-        "mssql": SqlalchemyAdapter,
-        "clickhouse": SqlalchemyAdapter,
-        "duckdb": SqlalchemyAdapter,
-        "bigquery": SqlalchemyAdapter,
-        "oracle": SqlalchemyAdapter,
-        "trino": SqlalchemyAdapter,
-        "redshift": SqlalchemyAdapter,
-        "snowflake": SqlalchemyAdapter,
-    }
 
-    if db_kind not in adapters:
-        raise ValueError(f"Unsupported database type: {db_type}")
+    if db_kind in _SQLALCHEMY_ADAPTERS:
+        if session is None:
+            raise ValueError(f"session is required for db_type={db_type!r}")
+        return SqlalchemyAdapter(session=session)
 
-    adapter_class = adapters[db_kind]
+    if db_kind == "clickhouse":
+        return ClickHouseAdapter(
+            host=host or "localhost",
+            port=port or 8123,
+            username=username or "default",
+            password=password or "",
+            database=database or "default",
+        )
 
-    return adapter_class(session=session)
+    raise ValueError(f"Unsupported database type: {db_type!r}")
