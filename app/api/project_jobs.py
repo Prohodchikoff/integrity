@@ -20,7 +20,6 @@ from app.api.project_models import (
     TestResultItemResponse,
     TestSummaryResponse,
 )
-from app.core.adapters.factory import get_adapter
 from app.core.database import db_registry
 from app.integrity.runner import load_project_graph, run_project
 from app.integrity.test_runner import run_project_tests
@@ -98,17 +97,7 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
         project_name=body.project_name,
     )
     async with manager.get_session() as session:
-        cfg = manager.db_config
-        adapter = get_adapter(
-            db_type=manager.db_type,
-            session=session,
-            host=cfg.host,
-            port=cfg.port,
-            username=cfg.username,
-            password=cfg.password,
-            database=cfg.database,
-        ) 
-        # adapter = get_adapter(session=session, db_type=manager.db_type)
+        adapter = manager.create_adapter(session)
 
         async def _on_model_result(item):
             if not job_id:
@@ -153,16 +142,7 @@ async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> Proje
         project_name=body.project_name,
     )
     async with manager.get_session() as session:
-        cfg = manager.db_config
-        adapter = get_adapter(
-            db_type=manager.db_type,
-            session=session,
-            host=cfg.host,
-            port=cfg.port,
-            username=cfg.username,
-            password=cfg.password,
-            database=cfg.database,
-        )
+        adapter = manager.create_adapter(session)
 
         async def _on_test_result(item):
             if not job_id:
@@ -226,7 +206,7 @@ def schedule_background_job(
             if kind == "run":
                 root = resolve_project_root(body.project_name)
                 loaded = load_project_graph(root)
-                job.progress_total = len(loaded.order)
+                job.progress_total = len(loaded.graph)
                 await _persist_job_snapshot(job)
                 response = await execute_run(body, job_id=job_id)
             else:

@@ -4,11 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .base import BaseAdapter
 from .sqlalchemy_base import SqlalchemyAdapter
 from .clickhouse import ClickHouseAdapter
-
+from .duckdb import DuckDBAdapter
 
 _SQLALCHEMY_ADAPTERS = {
     "postgresql", "mysql", "mariadb", "mssql",
-    "duckdb", "bigquery", "oracle", "trino",
+    "bigquery", "oracle", "trino",
     "redshift", "snowflake",
 }
 
@@ -36,5 +36,10 @@ def get_adapter(
             password=password or "",
             database=database or "default",
         )
+    
+    if db_kind == "duckdb":
+        if not database:
+            raise ValueError("database path is required for DuckDB")
+        return DuckDBAdapter(database=database)
 
     raise ValueError(f"Unsupported database type: {db_type!r}")

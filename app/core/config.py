@@ -51,6 +51,8 @@ class SQLDbConfig(BaseModel):
             raise ValueError(
                 "Provide `url`/`async_url` or host-based fields for SQL connection"
             )
+        if self.type == "duckdb" and not self.database:
+            raise ValueError("database path is required for DuckDB")
         return self
 
     @computed_field

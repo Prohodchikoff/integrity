@@ -8,11 +8,13 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 from app.settings import get_settings
+from app.core.adapters.factory import get_adapter
+from app.core.adapters.base import BaseAdapter
 
 
 logger = logging.getLogger("uvicorn.error")
 
-_NO_SQLALCHEMY_ADAPTERS = {"clickhouse"}
+_NO_SQLALCHEMY_ADAPTERS = {"clickhouse", "duckdb"}
 
 
 class DatabaseManager:
@@ -28,7 +30,6 @@ class DatabaseManager:
         self._db_config = settings.db_config
 
         if self._db_type in _NO_SQLALCHEMY_ADAPTERS:
-            # ClickHouse не використовує SQLAlchemy engine
             self._engine = None
             self._sessionmaker = None
             logger.info(
@@ -38,10 +39,10 @@ class DatabaseManager:
             return
 
         pool_kwargs = {
-            "pool_size": 5,
-            "max_overflow": 6,
+            "pool_size": 15,
+            "max_overflow": 25,
             "pool_pre_ping": False,
-            "pool_recycle": 20,
+            "pool_recycle": 3600,
             "pool_timeout": 30,
         }
 
@@ -82,6 +83,18 @@ class DatabaseManager:
     @property
     def db_config(self):
         return self._db_config
+
+    def create_adapter(self, session: AsyncSession | None) -> BaseAdapter:
+        cfg = self._db_config
+        return get_adapter(
+            db_type=self._db_type,
+            session=session,
+            host=cfg.host,
+            port=cfg.port,
+            username=cfg.username,
+            password=cfg.password,
+            database=cfg.database,
+        )
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:

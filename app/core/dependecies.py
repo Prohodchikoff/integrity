@@ -3,7 +3,6 @@ from fastapi import Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import DatabaseManager, db_registry
 from app.core.adapters.base import BaseAdapter
-from app.core.adapters.factory import get_adapter
 
 
 def get_db_manager(
@@ -24,7 +23,7 @@ async def get_db_adapter(
     db: "DBSessionDep",
     db_manager: "DatabaseManagerDep",
 ) -> BaseAdapter:
-    return get_adapter(session=db, db_type=db_manager.db_type)
+    return db_manager.create_adapter(db)
 
 
 DatabaseManagerDep = Annotated[DatabaseManager, Depends(get_db_manager)]
