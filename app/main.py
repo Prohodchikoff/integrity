@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.jobs.job_settings import init_job_tables
+from app.core.exceptions import register_exception_handlers
 from app.api.project_routes import router as project_router
 from app.api.routes import router
 from app.core.database import db_registry
@@ -14,6 +15,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+register_exception_handlers(app)
 
 app.include_router(router)
 app.include_router(project_router)

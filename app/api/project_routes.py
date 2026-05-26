@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks
 
 from app.jobs.project_helpers import resolve_project_root
 from app.jobs.project_jobs import execute_run, execute_test, get_job, schedule_background_job
@@ -20,12 +20,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 @router.post("/parse", response_model=ProjectParseResponse)
 def projects_parse(body: ProjectPathBody):
     root = resolve_project_root(body.project_name)
-    try:
-        r = parse_project(root)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    r = parse_project(root)
     return ProjectParseResponse(
         project_name=r.project_name,
         order=list(r.order),

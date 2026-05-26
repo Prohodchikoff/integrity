@@ -85,12 +85,7 @@ async def _append_event(
 
 async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> ProjectRunResponse:
     root = resolve_project_root(body.project_name)
-    try:
-        loaded = load_project_graph(root)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    loaded = load_project_graph(root)
 
     manager = db_registry.get_manager(
         env_name=body.env,
@@ -114,19 +109,14 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
             )
             await _persist_job_snapshot(job)
 
-        try:
-            result = await run_project(
-                root,
-                adapter,
-                env_name=body.env,
-                project_name=body.project_name,
-                on_model_result=_on_model_result if job_id else None,
-                _loaded=loaded,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+        result = await run_project(
+            root,
+            adapter,
+            env_name=body.env,
+            project_name=body.project_name,
+            on_model_result=_on_model_result if job_id else None,
+            _loaded=loaded,
+        )
 
     return ProjectRunResponse(
         project_name=result.project_name,
@@ -159,18 +149,13 @@ async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> Proje
             )
             await _persist_job_snapshot(job)
 
-        try:
-            result = await run_project_tests(
-                root,
-                adapter,
-                env_name=body.env,
-                project_name=body.project_name,
-                on_test_result=_on_test_result if job_id else None,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+        result = await run_project_tests(
+            root,
+            adapter,
+            env_name=body.env,
+            project_name=body.project_name,
+            on_test_result=_on_test_result if job_id else None,
+        )
 
     total = len(result.tests)
     failed = sum(1 for t in result.tests if not t.ok)

@@ -1,5 +1,4 @@
-from fastapi import APIRouter, status
-from fastapi.exceptions import HTTPException
+from fastapi import APIRouter
 from app.settings import get_settings, list_projects
 from app.api.dependecies import DBAdapterDep
 
@@ -20,10 +19,7 @@ def projects():
 
 @router.get('/test_connection')
 async def test_connection(adapter: DBAdapterDep):
-    try:
-        result = await adapter.execute("SELECT version()")
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+    result = await adapter.execute("SELECT version()")
     return result.scalar()
 
 
