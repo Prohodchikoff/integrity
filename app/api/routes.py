@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status
 from fastapi.exceptions import HTTPException
 from app.settings import get_settings, list_projects
-from app.core.dependecies import DBAdapterDep
+from app.api.dependecies import DBAdapterDep
 
 router = APIRouter()
 

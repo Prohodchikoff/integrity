@@ -8,9 +8,9 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.project_helpers import resolve_project_root
-from app.api.job_settings import JobEventRow, JobStatusRow, SessionLocal
-from app.api.project_models import (
+from app.jobs.project_helpers import resolve_project_root
+from app.jobs.job_settings import JobEventRow, JobStatusRow, SessionLocal
+from app.jobs.project_models import (
     ProjectJobAcceptedResponse,
     ProjectJobStatusResponse,
     ProjectRunBody,

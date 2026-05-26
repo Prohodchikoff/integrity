@@ -1,8 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from app.api.project_helpers import resolve_project_root
-from app.api.project_jobs import execute_run, execute_test, get_job, schedule_background_job
-from app.api.project_models import (
+from app.jobs.project_helpers import resolve_project_root
+from app.jobs.project_jobs import execute_run, execute_test, get_job, schedule_background_job
+from app.jobs.project_models import (
     ParsedModelInfoResponse,
     ProjectJobAcceptedResponse,
     ProjectJobStatusResponse,

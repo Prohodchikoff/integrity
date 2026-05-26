@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.api.job_settings import init_job_tables
+from app.jobs.job_settings import init_job_tables
 from app.api.project_routes import router as project_router
 from app.api.routes import router
 from app.core.database import db_registry
