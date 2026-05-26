@@ -27,8 +27,13 @@ def build_not_null_sql(relation: str, column: str) -> str:
 
 
 def build_unique_sql(relation: str, column: str, db_type: str) -> str:
-    if db_type in {"postgresql", "redshift", "duckdb", "trino",
-                   "snowflake", "bigquery", "oracle", "mssql"}:
+    if db_type == "mssql":
+        cond = (
+            f"(t2.{column} = t.{column} "
+            f"OR (t2.{column} IS NULL AND t.{column} IS NULL))"
+        )
+    elif db_type in {"postgresql", "redshift", "duckdb", "trino",
+                     "snowflake", "bigquery", "oracle"}:
         cond = f"t2.{column} IS NOT DISTINCT FROM t.{column}"
     elif db_type in {"mysql", "mariadb", "clickhouse"}:
         cond = f"t2.{column} <=> t.{column}"

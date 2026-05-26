@@ -5,9 +5,10 @@ from .base import BaseAdapter
 from .sqlalchemy_base import SqlalchemyAdapter
 from .clickhouse import ClickHouseAdapter
 from .duckdb import DuckDBAdapter
+from .mssql import MssqlAdapter, DEFAULT_ODBC_DRIVER, DEFAULT_PORT
 
 _SQLALCHEMY_ADAPTERS = {
-    "postgresql", "mysql", "mariadb", "mssql",
+    "postgresql", "mysql", "mariadb",
     "bigquery", "oracle", "trino",
     "redshift", "snowflake",
 }
@@ -20,6 +21,9 @@ def get_adapter(
     username: Optional[str] = None,
     password: Optional[str] = None,
     database: Optional[str] = None,
+    odbc_driver: Optional[str] = None,
+    encrypt: Optional[str] = None,
+    trust_server_certificate: Optional[str] = None,
 ) -> BaseAdapter:
     db_kind = db_type.strip().lower()
 
@@ -41,5 +45,19 @@ def get_adapter(
         if not database:
             raise ValueError("database path is required for DuckDB")
         return DuckDBAdapter(database=database)
+
+    if db_kind == "mssql":
+        if not database:
+            raise ValueError("database name is required for MSSQL")
+        return MssqlAdapter(
+            host=host or "localhost",
+            port=port or DEFAULT_PORT,
+            username=username or "sa",
+            password=password or "",
+            database=database,
+            odbc_driver=odbc_driver or DEFAULT_ODBC_DRIVER,
+            encrypt=encrypt or "yes",
+            trust_server_certificate=trust_server_certificate or "yes",
+        )
 
     raise ValueError(f"Unsupported database type: {db_type!r}")

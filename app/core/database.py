@@ -14,7 +14,7 @@ from app.core.adapters.base import BaseAdapter
 
 logger = logging.getLogger("uvicorn.error")
 
-_NO_SQLALCHEMY_ADAPTERS = {"clickhouse", "duckdb"}
+_NO_SQLALCHEMY_ADAPTERS = {"clickhouse", "duckdb", "mssql"}
 
 
 class DatabaseManager:
@@ -94,6 +94,9 @@ class DatabaseManager:
             username=cfg.username,
             password=cfg.password,
             database=cfg.database,
+            odbc_driver=cfg.odbc_driver,
+            encrypt=cfg.encrypt,
+            trust_server_certificate=cfg.trust_server_certificate,
         )
 
     @asynccontextmanager

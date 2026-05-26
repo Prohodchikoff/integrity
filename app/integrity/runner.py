@@ -53,7 +53,9 @@ def execution_namespace(settings: Settings) -> str:
     db = settings.db_config
     kind = db.type.strip().lower()
 
-    if kind in {"postgresql", "mssql", "duckdb", "trino", "oracle"}:
+    if kind == "mssql":
+        return db.schema_name or "dbo"
+    if kind in {"postgresql", "duckdb", "trino", "oracle"}:
         return db.schema_name or "public"
     if kind in {"mysql", "mariadb", "clickhouse", "redshift", "snowflake", "bigquery"}:
         if db.database:

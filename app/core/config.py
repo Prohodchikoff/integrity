@@ -20,8 +20,15 @@ DEFAULT_SYNC_DRIVERS: dict[str, str] = {
 DEFAULT_ASYNC_DRIVERS: dict[str, str] = {
     "postgresql": "asyncpg",
     "mysql": "aiomysql",
-    "mssql": "aioodbc",
     # "clickhouse": "asynch",
+}
+
+DEFAULT_PORTS: dict[str, int] = {
+    "mssql": 1433,
+    "postgresql": 5432,
+    "mysql": 3306,
+    "mariadb": 3306,
+    "clickhouse": 8123,
 }
 
 
@@ -38,6 +45,9 @@ class SQLDbConfig(BaseModel):
     async_dsn: str | None = Field(default=None, alias="async_url")
     sync_driver: str | None = None
     async_driver: str | None = None
+    odbc_driver: str | None = None
+    encrypt: str | None = None
+    trust_server_certificate: str | None = None
 
     @model_validator(mode="after")
     def validate_db_type_and_minimum_connection(self) -> "SQLDbConfig":
@@ -53,6 +63,8 @@ class SQLDbConfig(BaseModel):
             )
         if self.type == "duckdb" and not self.database:
             raise ValueError("database path is required for DuckDB")
+        if self.type == "mssql" and not self.database:
+            raise ValueError("database name is required for MSSQL")
         return self
 
     @computed_field
@@ -88,9 +100,23 @@ class SQLDbConfig(BaseModel):
             credentials = f"{credentials}@"
 
         host = self.host or ""
-        port = f":{self.port}" if self.port else ""
+        port_num = self.port if self.port is not None else DEFAULT_PORTS.get(self.type)
+        port = f":{port_num}" if port_num else ""
         database = f"/{self.database}" if self.database else ""
-        return f"{scheme}://{credentials}{host}{port}{database}"
+        url = f"{scheme}://{credentials}{host}{port}{database}"
+        if self.type == "mssql":
+            query_parts: list[str] = []
+            driver = self.odbc_driver or "ODBC Driver 18 for SQL Server"
+            query_parts.append(f"driver={driver.replace(' ', '+')}")
+            if self.encrypt is not None:
+                query_parts.append(f"Encrypt={self.encrypt}")
+            if self.trust_server_certificate is not None:
+                query_parts.append(
+                    f"TrustServerCertificate={self.trust_server_certificate}"
+                )
+            if query_parts:
+                url = f"{url}?{'&'.join(query_parts)}"
+        return url
 
 
 class EnvironmentConfig(BaseModel):
