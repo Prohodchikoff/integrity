@@ -1,6 +1,6 @@
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ProjectPathBody(BaseModel):
@@ -73,6 +73,8 @@ class ProjectJobAcceptedResponse(BaseModel):
 
 
 class ProjectJobStatusResponse(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     job_id: str
     kind: Literal["run", "test"]
     status: Literal["queued", "running", "succeeded", "failed"]
@@ -83,5 +85,30 @@ class ProjectJobStatusResponse(BaseModel):
     finished_at: str | None = None
     progress_done: int = 0
     progress_total: int | None = None
-    result: dict[str, Any] | None = None
+    result: ProjectRunResponse | ProjectTestsResponse | None = None
     error: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_result_by_kind(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        kind = data.get("kind")
+        result = data.get("result")
+        if result is None or not isinstance(result, dict) or kind not in {"run", "test"}:
+            return data
+        if kind == "run":
+            data["result"] = ProjectRunResponse.model_validate(result)
+        else:
+            data["result"] = ProjectTestsResponse.model_validate(result)
+        return data
+
+    @model_validator(mode="after")
+    def result_matches_kind(self) -> Self:
+        if self.result is None:
+            return self
+        if self.kind == "run" and not isinstance(self.result, ProjectRunResponse):
+            raise ValueError("result must be ProjectRunResponse for run jobs")
+        if self.kind == "test" and not isinstance(self.result, ProjectTestsResponse):
+            raise ValueError("result must be ProjectTestsResponse for test jobs")
+        return self

@@ -146,7 +146,7 @@ class DatabaseManager:
 
         @event.listens_for(sync_engine, "handle_error")
         def on_handle_error(exception_context):
-            logger.exception("Database connection/pool error nvironment=%s, db_type=%s, is_disconnect=%s, is_pre_ping=%s", self._environment, self._db_type, exception_context.is_disconnect, exception_context.is_pre_ping)
+            logger.exception("Database connection/pool error environment=%s, db_type=%s, is_disconnect=%s, is_pre_ping=%s", self._environment, self._db_type, exception_context.is_disconnect, exception_context.is_pre_ping)
 
 
 class DatabaseRegistry:

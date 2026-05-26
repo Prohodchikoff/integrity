@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ClickHouseResult:
-    """Wrapper щоб імітувати SQLAlchemy Result interface."""
+    """Wrapper mimicking the SQLAlchemy Result interface."""
 
     def __init__(self, query_result):
         self._result = query_result
