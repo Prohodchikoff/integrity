@@ -6,6 +6,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.jobs.project_helpers import resolve_project_root
@@ -22,13 +23,19 @@ from app.jobs.project_models import (
 )
 from app.core.database import db_registry
 from app.integrity.runner import load_project_graph, run_project
-from app.integrity.test_runner import run_project_tests
+from app.integrity.test_runner import planned_test_count, run_project_tests
 
 _project_jobs: dict[str, ProjectJobStatusResponse] = {}
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _json_dump_result(value: Any) -> str:
+    if isinstance(value, BaseModel):
+        return value.model_dump_json()
+    return json.dumps(value)
 
 
 async def _persist_job_snapshot(job: ProjectJobStatusResponse) -> None:
@@ -48,7 +55,7 @@ async def _persist_job_snapshot(job: ProjectJobStatusResponse) -> None:
         row.progress_done = job.progress_done
         row.progress_total = job.progress_total
         row.error_text = job.error
-        row.result_json = None if job.result is None else json.dumps(job.result)
+        row.result_json = None if job.result is None else _json_dump_result(job.result)
         db.commit()
     except SQLAlchemyError:
         db.rollback()
@@ -109,14 +116,17 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
             )
             await _persist_job_snapshot(job)
 
-        result = await run_project(
-            root,
-            adapter,
-            env_name=body.env,
-            project_name=body.project_name,
-            on_model_result=_on_model_result if job_id else None,
-            _loaded=loaded,
-        )
+        try:
+            result = await run_project(
+                root,
+                adapter,
+                env_name=body.env,
+                project_name=body.project_name,
+                on_model_result=_on_model_result if job_id else None,
+                _loaded=loaded,
+            )
+        finally:
+            await adapter.close()
 
     return ProjectRunResponse(
         project_name=result.project_name,
@@ -149,13 +159,16 @@ async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> Proje
             )
             await _persist_job_snapshot(job)
 
-        result = await run_project_tests(
-            root,
-            adapter,
-            env_name=body.env,
-            project_name=body.project_name,
-            on_test_result=_on_test_result if job_id else None,
-        )
+        try:
+            result = await run_project_tests(
+                root,
+                adapter,
+                env_name=body.env,
+                project_name=body.project_name,
+                on_test_result=_on_test_result if job_id else None,
+            )
+        finally:
+            await adapter.close()
 
     total = len(result.tests)
     failed = sum(1 for t in result.tests if not t.ok)
@@ -196,6 +209,8 @@ def schedule_background_job(
                 response = await execute_run(body, job_id=job_id)
             else:
                 root = resolve_project_root(body.project_name)
+                job.progress_total = planned_test_count(root)
+                await _persist_job_snapshot(job)
                 response = await execute_test(body, job_id=job_id)
             job.status = "succeeded"
             job.result = response.model_dump()

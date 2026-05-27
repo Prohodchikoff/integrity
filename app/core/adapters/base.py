@@ -16,3 +16,6 @@ class BaseAdapter(ABC):
         self, namespace: str, view_name: str, select_sql: str
     ) -> None:
         pass
+
+    async def close(self) -> None:
+        return None

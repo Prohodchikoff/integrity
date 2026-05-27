@@ -37,6 +37,16 @@ class TestRunResult:
     tests: tuple[TestResult, ...]
 
 
+def planned_test_count(project_root: Path) -> int:
+    root = project_root.resolve()
+    project = load_project_file(root)
+    return sum(
+        len(column_cfg.list_tests)
+        for model_cfg in project.tests
+        for column_cfg in model_cfg.columns
+    )
+
+
 def _quote_column(db_type: str, column: str) -> str:
     if db_type in {"postgresql", "redshift", "snowflake", "bigquery",
                    "duckdb", "trino", "oracle", "mssql"}:

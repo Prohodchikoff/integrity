@@ -62,3 +62,6 @@ class ClickHouseAdapter(BaseAdapter):
             f"CREATE OR REPLACE VIEW `{namespace}`.`{view_name}` AS\n{select_sql}"
         )
         await self._run(lambda: self._client.command(stmt))
+
+    async def close(self) -> None:
+        await self._run(self._client.close)

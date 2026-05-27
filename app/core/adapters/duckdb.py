@@ -46,3 +46,6 @@ class DuckDBAdapter(BaseAdapter):
     ) -> None:
         stmt = f'CREATE OR REPLACE VIEW "{namespace}"."{view_name}" AS\n{select_sql}'
         await self._run(lambda: self._conn.execute(stmt))
+
+    async def close(self) -> None:
+        await self._run(self._conn.close)
