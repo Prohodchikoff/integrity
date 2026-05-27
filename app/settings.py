@@ -9,6 +9,7 @@ from app.core.config import EnvironmentConfig
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config" / "environments.yaml"
+ENVFILE_PATH = BASE_DIR.parent / '.env'
 
 
 class Settings(BaseModel):

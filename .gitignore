@@ -207,3 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 app/config/*
+!app/config/environments.example.yaml
+!app/config/example/
+!app/config/example/**

@@ -1,0 +1,13 @@
+name: example
+models_dir: models
+tests_dir: tests
+
+tests:
+  - model: stg_customer
+    columns:
+      customer_email:
+        tests:
+          - not_null
+          - not_blank
+          - customer_email
+

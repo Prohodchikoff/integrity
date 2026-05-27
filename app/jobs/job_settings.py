@@ -1,13 +1,14 @@
 import os
-
 from sqlalchemy import Column, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Replace with your actual MySQL credentials.
-DATABASE_URL = os.getenv(
-    "JOB_DATABASE_URL",
-    "mysql+pymysql://root:000000@localhost:3306/jobs",
-)
+
+DATABASE_URL = os.getenv("JOB_DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "JOB_DATABASE_URL is required (e.g. mysql+pymysql://user:pass@host:3306/jobs)"
+    )
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

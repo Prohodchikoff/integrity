@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+from app.settings import ENVFILE_PATH
+load_dotenv(ENVFILE_PATH)
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.jobs.job_settings import init_job_tables
