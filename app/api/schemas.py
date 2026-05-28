@@ -68,3 +68,12 @@ class SettingsPublicResponse(BaseModel):
                 connection=DatabaseConfig.from_db_config(db),
             ),
         )
+
+
+class ProjectsListResponse(BaseModel):
+    projects: list[str]
+
+
+class ConnectionTestResponse(BaseModel):
+    database_type: str
+    version: str | None = None

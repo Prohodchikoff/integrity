@@ -1,18 +1,75 @@
 import os
-from sqlalchemy import Column, Integer, String, Text, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from contextlib import asynccontextmanager
+from typing import Annotated, Any, AsyncGenerator, AsyncIterator
+
+from fastapi import Depends
+from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import declarative_base
 
 
 DATABASE_URL = os.getenv("JOB_DATABASE_URL")
 
 if not DATABASE_URL:
     raise RuntimeError(
-        "JOB_DATABASE_URL is required (e.g. mysql+pymysql://user:pass@host:3306/jobs)"
+        "JOB_DATABASE_URL is required (e.g. mysql+aiomysql://user:pass@host:3306/jobs)"
     )
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+class DatabaseSessionManager:
+    def __init__(self, host: str, engine_kwargs: dict[str, Any] | None = None):
+        kwargs = engine_kwargs or {}
+        self._engine = create_async_engine(host, **kwargs)
+        self._sessionmaker = async_sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+            bind=self._engine,
+        )
+
+    async def close(self) -> None:
+        if self._engine is None:
+            raise RuntimeError("DatabaseSessionManager is not initialized")
+        await self._engine.dispose()
+        self._engine = None
+        self._sessionmaker = None
+
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[AsyncConnection]:
+        if self._engine is None:
+            raise RuntimeError("DatabaseSessionManager is not initialized")
+        async with self._engine.begin() as connection:
+            try:
+                yield connection
+            except Exception:
+                await connection.rollback()
+                raise
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        if self._sessionmaker is None:
+            raise RuntimeError("DatabaseSessionManager is not initialized")
+        session = self._sessionmaker()
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+sessionmanager = DatabaseSessionManager(
+    DATABASE_URL,
+    {"pool_pre_ping": True},
+)
 
 
 class JobStatusRow(Base):
@@ -46,5 +103,18 @@ class JobEventRow(Base):
     created_at = Column(String(64), nullable=False)
 
 
-def init_job_tables() -> None:
-    Base.metadata.create_all(bind=engine)
+async def init_job_tables() -> None:
+    async with sessionmanager.connect() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+
+async def get_job_db() -> AsyncGenerator[AsyncSession, None]:
+    async with sessionmanager.session() as session:
+        yield session
+
+
+async def close_job_db() -> None:
+    await sessionmanager.close()
+
+
+JobDBSessionDep = Annotated[AsyncSession, Depends(get_job_db)]

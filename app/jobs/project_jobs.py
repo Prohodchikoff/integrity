@@ -7,11 +7,13 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import desc, select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs.project_helpers import resolve_project_root
-from app.jobs.job_settings import JobEventRow, JobStatusRow, SessionLocal
-from app.jobs.project_models import (
+from app.jobs.job_settings import JobEventRow, JobStatusRow, sessionmanager
+from app.jobs.project_sсhemas import (
     ProjectJobAcceptedResponse,
     ProjectJobStatusResponse,
     ProjectRunBody,
@@ -25,8 +27,6 @@ from app.core.database import db_registry
 from app.integrity.runner import load_project_graph, run_project
 from app.integrity.test_runner import planned_test_count, run_project_tests
 
-_project_jobs: dict[str, ProjectJobStatusResponse] = {}
-
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -38,29 +38,60 @@ def _json_dump_result(value: Any) -> str:
     return json.dumps(value)
 
 
-async def _persist_job_snapshot(job: ProjectJobStatusResponse) -> None:
-    db = SessionLocal()
+def _json_load_result(value: str | None) -> dict[str, Any] | None:
+    if not value:
+        return None
     try:
-        row = db.query(JobStatusRow).filter(JobStatusRow.job_id == job.job_id).first()
-        if row is None:
-            row = JobStatusRow(job_id=job.job_id)
-            db.add(row)
-        row.kind = job.kind
-        row.status = job.status
-        row.project_name = job.project_name
-        row.env_name = job.env
-        row.created_at = job.created_at
-        row.started_at = job.started_at
-        row.finished_at = job.finished_at
-        row.progress_done = job.progress_done
-        row.progress_total = job.progress_total
-        row.error_text = job.error
-        row.result_json = None if job.result is None else _json_dump_result(job.result)
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-    finally:
-        db.close()
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    return loaded
+
+
+def _row_to_job(row: JobStatusRow) -> ProjectJobStatusResponse:
+    payload: dict[str, Any] = {
+        "job_id": row.job_id,
+        "kind": row.kind,
+        "status": row.status,
+        "project_name": row.project_name,
+        "env": row.env_name,
+        "created_at": row.created_at,
+        "started_at": row.started_at,
+        "finished_at": row.finished_at,
+        "progress_done": row.progress_done or 0,
+        "progress_total": row.progress_total,
+        "error": row.error_text,
+    }
+    result = _json_load_result(row.result_json)
+    if result is not None:
+        payload["result"] = result
+    return ProjectJobStatusResponse.model_validate(payload)
+
+
+async def _persist_job_snapshot(job: ProjectJobStatusResponse) -> None:
+    async with sessionmanager.session() as db:
+        try:
+            row = await db.scalar(select(JobStatusRow).where(JobStatusRow.job_id == job.job_id))
+            if row is None:
+                row = JobStatusRow(job_id=job.job_id)
+                db.add(row)
+            row.kind = job.kind
+            row.status = job.status
+            row.project_name = job.project_name
+            row.env_name = job.env
+            row.created_at = job.created_at
+            row.started_at = job.started_at
+            row.finished_at = job.finished_at
+            row.progress_done = job.progress_done
+            row.progress_total = job.progress_total
+            row.error_text = job.error
+            row.result_json = None if job.result is None else _json_dump_result(job.result)
+            await db.commit()
+        except SQLAlchemyError:
+            await db.rollback()
+            raise
 
 
 async def _append_event(
@@ -71,23 +102,22 @@ async def _append_event(
     payload: dict[str, Any] | None = None,
     error: str | None = None,
 ) -> None:
-    db = SessionLocal()
-    try:
-        row = JobEventRow(
-            job_id=job.job_id,
-            event_kind=event_kind,
-            item_name=item_name,
-            status=status,
-            error_text=error,
-            payload_json=None if payload is None else json.dumps(payload),
-            created_at=utc_now(),
-        )
-        db.add(row)
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-    finally:
-        db.close()
+    async with sessionmanager.session() as db:
+        try:
+            row = JobEventRow(
+                job_id=job.job_id,
+                event_kind=event_kind,
+                item_name=item_name,
+                status=status,
+                error_text=error,
+                payload_json=None if payload is None else json.dumps(payload),
+                created_at=utc_now(),
+            )
+            db.add(row)
+            await db.commit()
+        except SQLAlchemyError:
+            await db.rollback()
+            raise
 
 
 async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> ProjectRunResponse:
@@ -104,7 +134,7 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
         async def _on_model_result(item):
             if not job_id:
                 return
-            job = _project_jobs[job_id]
+            job = await _get_job_with_new_session(job_id)
             job.progress_done += 1
             await _append_event(
                 job,
@@ -147,7 +177,7 @@ async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> Proje
         async def _on_test_result(item):
             if not job_id:
                 return
-            job = _project_jobs[job_id]
+            job = await _get_job_with_new_session(job_id)
             job.progress_done += 1
             await _append_event(
                 job,
@@ -194,7 +224,7 @@ def schedule_background_job(
         env=body.env,
         created_at=utc_now(),
     )
-    _project_jobs[job_id] = job
+    background_tasks.add_task(_persist_job_snapshot, job)
 
     async def _job_runner() -> None:
         job.status = "running"
@@ -225,8 +255,104 @@ def schedule_background_job(
     return ProjectJobAcceptedResponse(job_id=job_id, status="queued")
 
 
-def get_job(job_id: str) -> ProjectJobStatusResponse:
-    job = _project_jobs.get(job_id)
-    if not job:
+async def get_job(job_id: str, db: AsyncSession | None = None) -> ProjectJobStatusResponse:
+    if db is not None:
+        return await _get_job(job_id=job_id, db=db)
+    async with sessionmanager.session() as db:
+        return await _get_job(job_id=job_id, db=db)
+
+
+async def _get_job_with_new_session(job_id: str) -> ProjectJobStatusResponse:
+    async with sessionmanager.session() as db:
+        return await _get_job(job_id=job_id, db=db)
+
+
+async def _get_job(job_id: str, db: AsyncSession) -> ProjectJobStatusResponse:
+    row = await db.scalar(select(JobStatusRow).where(JobStatusRow.job_id == job_id))
+    if row is None:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-    return job
+    return _row_to_job(row)
+
+
+async def list_jobs(
+    project_name: str | None = None,
+    kind: Literal["run", "test"] | None = None,
+    status: Literal["queued", "running", "succeeded", "failed"] | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    db: AsyncSession | None = None,
+) -> list[ProjectJobStatusResponse]:
+    if db is not None:
+        return await _list_jobs(
+            db=db,
+            project_name=project_name,
+            kind=kind,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    async with sessionmanager.session() as db:
+        return await _list_jobs(
+            db=db,
+            project_name=project_name,
+            kind=kind,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+
+async def _list_jobs(
+    db: AsyncSession,
+    project_name: str | None = None,
+    kind: Literal["run", "test"] | None = None,
+    status: Literal["queued", "running", "succeeded", "failed"] | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[ProjectJobStatusResponse]:
+    query = select(JobStatusRow)
+    if project_name:
+        query = query.where(JobStatusRow.project_name == project_name)
+    if kind:
+        query = query.where(JobStatusRow.kind == kind)
+    if status:
+        query = query.where(JobStatusRow.status == status)
+
+    query = query.order_by(desc(JobStatusRow.created_at)).offset(max(offset, 0)).limit(max(limit, 0))
+    rows = (await db.scalars(query)).all()
+    return [_row_to_job(row) for row in rows]
+
+
+async def get_latest_job(
+    project_name: str | None = None,
+    kind: Literal["run", "test"] | None = None,
+    status: Literal["queued", "running", "succeeded", "failed"] | None = None,
+    db: AsyncSession | None = None,
+) -> ProjectJobStatusResponse:
+    jobs = await list_jobs(project_name=project_name, kind=kind, status=status, limit=1, offset=0, db=db)
+    if not jobs:
+        raise HTTPException(status_code=404, detail="No jobs found for provided filters")
+    return jobs[0]
+
+
+async def get_job_result(job_id: str, db: AsyncSession | None = None) -> ProjectRunResponse | ProjectTestsResponse:
+    if db is not None:
+        job = await _get_job(job_id=job_id, db=db)
+    else:
+        job = await get_job(job_id)
+    if job.status in {"queued", "running"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is not finished yet: {job_id}",
+        )
+    if job.status == "failed":
+        raise HTTPException(
+            status_code=409,
+            detail=job.error or f"Job failed: {job_id}",
+        )
+    if job.result is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Job finished without result: {job_id}",
+        )
+    return job.result

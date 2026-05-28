@@ -4,7 +4,7 @@ load_dotenv(ENVFILE_PATH)
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.jobs.job_settings import init_job_tables
+from app.jobs.job_settings import close_job_db, init_job_tables
 from app.core.exceptions import register_exception_handlers
 from app.api.project_routes import router as project_router
 from app.api.routes import router
@@ -13,8 +13,9 @@ from app.core.database import db_registry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_job_tables()
+    await init_job_tables()
     yield
+    await close_job_db()
     await db_registry.close_all()
 
 

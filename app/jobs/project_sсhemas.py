@@ -112,3 +112,21 @@ class ProjectJobStatusResponse(BaseModel):
         if self.kind == "test" and not isinstance(self.result, ProjectTestsResponse):
             raise ValueError("result must be ProjectTestsResponse for test jobs")
         return self
+
+
+class ProjectJobsQuery(BaseModel):
+    project_name: str | None = Field(default=None, description="Filter by project name")
+    kind: Literal["run", "test"] | None = Field(default=None, description="Filter by job kind")
+    status: Literal["queued", "running", "succeeded", "failed"] | None = Field(
+        default=None,
+        description="Filter by job status",
+    )
+    limit: int = Field(default=20, ge=1, le=100, description="Maximum number of jobs to return")
+    offset: int = Field(default=0, ge=0, description="Number of jobs to skip")
+
+
+class ProjectJobsListResponse(BaseModel):
+    items: list[ProjectJobStatusResponse]
+    limit: int
+    offset: int
+    returned: int
