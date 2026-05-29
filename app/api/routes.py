@@ -1,7 +1,13 @@
 from fastapi import APIRouter
-from app.settings import get_settings, list_projects
+from app.settings import get_settings, list_projects, reload_settings_cache
 from app.api.dependencies import DBAdapterDep
-from app.api.schemas import ConnectionTestResponse, ProjectsListResponse, SettingsPublicResponse
+from app.core.database import db_registry
+from app.api.schemas import (
+    ConfigReloadResponse,
+    ConnectionTestResponse,
+    ProjectsListResponse,
+    SettingsPublicResponse,
+)
 
 router = APIRouter()
 
@@ -39,3 +45,18 @@ async def test_connection(adapter: DBAdapterDep) -> ConnectionTestResponse:
         database_type=adapter.__class__.__name__,
         version=version,
     )
+
+
+@router.post(
+    "/config/reload",
+    response_model=ConfigReloadResponse,
+    summary="Reload environments config",
+    description=(
+        "Clears cached environments.yaml settings and closes open DB managers "
+        "so the next request picks up file changes without restarting the app."
+    ),
+)
+async def reload_config() -> ConfigReloadResponse:
+    reload_settings_cache()
+    await db_registry.close_all()
+    return ConfigReloadResponse(status="reloaded", projects=list_projects())

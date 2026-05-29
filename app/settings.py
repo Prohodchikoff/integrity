@@ -1,5 +1,4 @@
 from pathlib import Path
-from functools import lru_cache
 import os
 import yaml
 from pydantic import BaseModel, Field
@@ -60,21 +59,44 @@ class ConfigFile(BaseModel):
     projects: dict[str, ProjectSettings]
 
 
-@lru_cache(maxsize=1)
-def get_config() -> ConfigFile:
+_config: ConfigFile | None = None
+_cached_config_mtime: float | None = None
+_settings_cache: dict[tuple[str, str | None], Settings] = {}
+_cached_settings_mtime: float | None = None
+
+
+def _read_config_file_mtime() -> float:
+    return CONFIG_PATH.stat().st_mtime
+
+
+def _load_config_file() -> ConfigFile:
     data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
     return ConfigFile.model_validate(data)
+
+
+def get_config() -> ConfigFile:
+    global _config, _cached_config_mtime
+    mtime = _read_config_file_mtime()
+    if _config is None or _cached_config_mtime != mtime:
+        _config = _load_config_file()
+        _cached_config_mtime = mtime
+    return _config
+
+
+def reload_settings_cache() -> None:
+    """Drop in-memory config/settings caches (e.g. after manual YAML edit)."""
+    global _config, _cached_config_mtime, _settings_cache, _cached_settings_mtime
+    _config = None
+    _cached_config_mtime = None
+    _settings_cache.clear()
+    _cached_settings_mtime = None
 
 
 def list_projects() -> list[str]:
     return sorted(get_config().projects.keys())
 
 
-@lru_cache
-def get_settings(
-    project_name: str,
-    env_name: str | None = None,
-) -> Settings:
+def _build_settings(project_name: str, env_name: str | None) -> Settings:
     config = get_config()
     project = config.projects.get(project_name)
     if not project:
@@ -95,3 +117,19 @@ def get_settings(
             "config": env_data,
         }
     )
+
+
+def get_settings(
+    project_name: str,
+    env_name: str | None = None,
+) -> Settings:
+    global _settings_cache, _cached_settings_mtime
+    mtime = _read_config_file_mtime()
+    if _cached_settings_mtime != mtime:
+        _settings_cache.clear()
+        _cached_settings_mtime = mtime
+
+    key = (project_name, env_name)
+    if key not in _settings_cache:
+        _settings_cache[key] = _build_settings(project_name, env_name)
+    return _settings_cache[key]

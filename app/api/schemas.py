@@ -77,3 +77,8 @@ class ProjectsListResponse(BaseModel):
 class ConnectionTestResponse(BaseModel):
     database_type: str
     version: str | None = None
+
+
+class ConfigReloadResponse(BaseModel):
+    status: str
+    projects: list[str]

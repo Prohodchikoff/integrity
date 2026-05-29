@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -25,6 +24,7 @@ from app.jobs.project_schemas import (
     TestSummaryResponse,
 )
 from app.core.database import _NO_SQLALCHEMY_ADAPTERS, db_registry
+from app.core.time_utils import utc_now
 from app.integrity.runner import load_project_graph, run_project
 from app.integrity.test_runner import planned_test_count, run_project_tests
 
@@ -35,10 +35,6 @@ def _merge_job_error(job: ProjectJobStatusResponse, message: str) -> str:
     if job.error:
         return f"{job.error}; {message}"
     return message
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _json_dump_result(value: Any) -> str:
