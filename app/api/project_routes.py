@@ -11,7 +11,7 @@ from app.jobs.project_jobs import (
     list_jobs,
     schedule_background_job,
 )
-from app.jobs.project_sсhemas import (
+from app.jobs.project_schemas import (
     ParsedModelInfoResponse,
     ProjectJobAcceptedResponse,
     ProjectJobsListResponse,

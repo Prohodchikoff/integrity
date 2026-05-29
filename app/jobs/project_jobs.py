@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs.project_helpers import resolve_project_root
 from app.jobs.job_settings import JobEventRow, JobStatusRow, sessionmanager
-from app.jobs.project_sсhemas import (
+from app.jobs.project_schemas import (
     ProjectJobAcceptedResponse,
     ProjectJobStatusResponse,
     ProjectRunBody,
@@ -26,6 +27,14 @@ from app.jobs.project_sсhemas import (
 from app.core.database import db_registry
 from app.integrity.runner import load_project_graph, run_project
 from app.integrity.test_runner import planned_test_count, run_project_tests
+
+logger = logging.getLogger(__name__)
+
+
+def _merge_job_error(job: ProjectJobStatusResponse, message: str) -> str:
+    if job.error:
+        return f"{job.error}; {message}"
+    return message
 
 
 def utc_now() -> str:
@@ -70,7 +79,47 @@ def _row_to_job(row: JobStatusRow) -> ProjectJobStatusResponse:
     return ProjectJobStatusResponse.model_validate(payload)
 
 
-async def _persist_job_snapshot(job: ProjectJobStatusResponse) -> None:
+async def _try_mark_job_failed(job: ProjectJobStatusResponse, error: str) -> bool:
+    message = error[:4000]
+    finished_at = utc_now()
+    try:
+        async with sessionmanager.session() as db:
+            try:
+                row = await db.scalar(select(JobStatusRow).where(JobStatusRow.job_id == job.job_id))
+                if row is None:
+                    row = JobStatusRow(
+                        job_id=job.job_id,
+                        kind=job.kind,
+                        status="failed",
+                        project_name=job.project_name,
+                        env_name=job.env,
+                        created_at=job.created_at,
+                        started_at=job.started_at,
+                        finished_at=finished_at,
+                        progress_done=job.progress_done,
+                        progress_total=job.progress_total,
+                        error_text=message,
+                    )
+                    db.add(row)
+                else:
+                    row.status = "failed"
+                    row.error_text = message
+                    row.finished_at = finished_at
+                await db.commit()
+                return True
+            except SQLAlchemyError:
+                await db.rollback()
+                raise
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Could not persist failed job status job_id=%s (jobs DB unavailable): %s",
+            job.job_id,
+            exc,
+        )
+        return False
+
+
+async def _persist_job_snapshot(job: ProjectJobStatusResponse, *, background: bool = False) -> None:
     async with sessionmanager.session() as db:
         try:
             row = await db.scalar(select(JobStatusRow).where(JobStatusRow.job_id == job.job_id))
@@ -89,38 +138,86 @@ async def _persist_job_snapshot(job: ProjectJobStatusResponse) -> None:
             row.error_text = job.error
             row.result_json = None if job.result is None else _json_dump_result(job.result)
             await db.commit()
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
             await db.rollback()
+            logger.exception(
+                "Failed to persist job snapshot job_id=%s status=%s",
+                job.job_id,
+                job.status,
+            )
+            if background:
+                message = f"Failed to persist job status: {exc}"
+                job.status = "failed"
+                job.error = _merge_job_error(job, message)
+                job.finished_at = utc_now()
+                persisted = await _try_mark_job_failed(job, job.error)
+                if not persisted:
+                    logger.warning(
+                        "Job %s marked failed in memory only; jobs DB was unavailable",
+                        job.job_id,
+                    )
             raise
 
 
-async def _append_event(
-    job: ProjectJobStatusResponse,
+async def _record_job_progress(
+    job_id: str,
+    *,
     event_kind: str,
     item_name: str | None,
-    status: str,
+    event_status: str,
     payload: dict[str, Any] | None = None,
     error: str | None = None,
+    background: bool = False,
+    job_ctx: ProjectJobStatusResponse | None = None,
 ) -> None:
     async with sessionmanager.session() as db:
         try:
-            row = JobEventRow(
-                job_id=job.job_id,
-                event_kind=event_kind,
-                item_name=item_name,
-                status=status,
-                error_text=error,
-                payload_json=None if payload is None else json.dumps(payload),
-                created_at=utc_now(),
+            updated = await db.execute(
+                update(JobStatusRow)
+                .where(JobStatusRow.job_id == job_id)
+                .values(progress_done=JobStatusRow.progress_done + 1)
             )
-            db.add(row)
+            if updated.rowcount == 0:
+                raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+            db.add(
+                JobEventRow(
+                    job_id=job_id,
+                    event_kind=event_kind,
+                    item_name=item_name,
+                    status=event_status,
+                    error_text=error,
+                    payload_json=None if payload is None else json.dumps(payload),
+                    created_at=utc_now(),
+                )
+            )
             await db.commit()
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
             await db.rollback()
+            logger.exception(
+                "Failed to record job progress job_id=%s event_kind=%s item_name=%s",
+                job_id,
+                event_kind,
+                item_name,
+            )
+            if background and job_ctx is not None:
+                message = f"Failed to record job progress: {exc}"
+                job_ctx.status = "failed"
+                job_ctx.error = _merge_job_error(job_ctx, message)
+                job_ctx.finished_at = utc_now()
+                if not await _try_mark_job_failed(job_ctx, job_ctx.error):
+                    logger.warning(
+                        "Job %s marked failed in memory only; jobs DB was unavailable",
+                        job_id,
+                    )
             raise
 
 
-async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> ProjectRunResponse:
+async def execute_run(
+    body: ProjectRunBody,
+    job_id: str | None = None,
+    job_ctx: ProjectJobStatusResponse | None = None,
+) -> ProjectRunResponse:
     root = resolve_project_root(body.project_name)
     loaded = load_project_graph(root)
 
@@ -134,17 +231,16 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
         async def _on_model_result(item):
             if not job_id:
                 return
-            job = await _get_job_with_new_session(job_id)
-            job.progress_done += 1
-            await _append_event(
-                job,
+            await _record_job_progress(
+                job_id,
                 event_kind="model",
                 item_name=item.name,
-                status="succeeded" if item.ok else "failed",
+                event_status="succeeded" if item.ok else "failed",
                 payload={"elapsed_ms": item.elapsed_ms},
                 error=item.error,
+                background=True,
+                job_ctx=job_ctx,
             )
-            await _persist_job_snapshot(job)
 
         try:
             result = await run_project(
@@ -165,7 +261,11 @@ async def execute_run(body: ProjectRunBody, job_id: str | None = None) -> Projec
     )
 
 
-async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> ProjectTestsResponse:
+async def execute_test(
+    body: ProjectRunBody,
+    job_id: str | None = None,
+    job_ctx: ProjectJobStatusResponse | None = None,
+) -> ProjectTestsResponse:
     root = resolve_project_root(body.project_name)
     manager = db_registry.get_manager(
         env_name=body.env,
@@ -177,17 +277,16 @@ async def execute_test(body: ProjectRunBody, job_id: str | None = None) -> Proje
         async def _on_test_result(item):
             if not job_id:
                 return
-            job = await _get_job_with_new_session(job_id)
-            job.progress_done += 1
-            await _append_event(
-                job,
+            await _record_job_progress(
+                job_id,
                 event_kind="test",
                 item_name=item.test_id,
-                status="succeeded" if item.ok else "failed",
+                event_status="succeeded" if item.ok else "failed",
                 payload={"fail_count": item.fail_count},
                 error=item.error,
+                background=True,
+                job_ctx=job_ctx,
             )
-            await _persist_job_snapshot(job)
 
         try:
             result = await run_project_tests(
@@ -224,24 +323,24 @@ def schedule_background_job(
         env=body.env,
         created_at=utc_now(),
     )
-    background_tasks.add_task(_persist_job_snapshot, job)
+    background_tasks.add_task(_persist_job_snapshot, job, background=True)
 
     async def _job_runner() -> None:
         job.status = "running"
         job.started_at = utc_now()
-        await _persist_job_snapshot(job)
         try:
+            await _persist_job_snapshot(job, background=True)
             if kind == "run":
                 root = resolve_project_root(body.project_name)
                 loaded = load_project_graph(root)
                 job.progress_total = len(loaded.graph)
-                await _persist_job_snapshot(job)
-                response = await execute_run(body, job_id=job_id)
+                await _persist_job_snapshot(job, background=True)
+                response = await execute_run(body, job_id=job_id, job_ctx=job)
             else:
                 root = resolve_project_root(body.project_name)
                 job.progress_total = planned_test_count(root)
-                await _persist_job_snapshot(job)
-                response = await execute_test(body, job_id=job_id)
+                await _persist_job_snapshot(job, background=True)
+                response = await execute_test(body, job_id=job_id, job_ctx=job)
             job.status = "succeeded"
             job.result = response.model_dump()
         except Exception as exc:
@@ -249,7 +348,16 @@ def schedule_background_job(
             job.error = str(exc)
         finally:
             job.finished_at = utc_now()
-            await _persist_job_snapshot(job)
+            try:
+                snapshot = await _get_job_with_new_session(job_id)
+                snapshot.status = job.status
+                snapshot.result = job.result
+                snapshot.error = job.error
+                snapshot.finished_at = job.finished_at
+                snapshot.progress_total = job.progress_total
+                await _persist_job_snapshot(snapshot, background=True)
+            except SQLAlchemyError:
+                pass
 
     background_tasks.add_task(_job_runner)
     return ProjectJobAcceptedResponse(job_id=job_id, status="queued")
