@@ -1,9 +1,30 @@
 from typing import Optional
+
 from sqlalchemy import text
+
 from .base import BaseAdapter
+
+_VERSION_QUERIES: dict[str, str] = {
+    "postgresql": "SELECT version()",
+    "mysql": "SELECT version()",
+    "mariadb": "SELECT version()",
+    "mssql": "SELECT @@VERSION AS version",
+    "clickhouse": "SELECT version()",
+    "duckdb": "SELECT version()",
+}
 
 
 class SqlalchemyAdapter(BaseAdapter):
+    async def get_version(self) -> str:
+        bind = self.session.sync_session.get_bind()
+        dialect = bind.dialect.name
+        query = _VERSION_QUERIES.get(dialect, "SELECT version()")
+        result = await self.execute(query)
+        version = result.scalar()
+        if version is None:
+            raise ValueError(f"No version returned for dialect={dialect!r}")
+        return str(version)
+
     async def execute(self, query: str, params: Optional[dict] = None):
         result = await self.session.execute(text(query), params or {})
 

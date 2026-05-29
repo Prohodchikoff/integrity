@@ -5,28 +5,7 @@ import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 
 from .base import BaseAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
-
-
-class ClickHouseResult:
-    """Wrapper mimicking the SQLAlchemy Result interface."""
-
-    def __init__(self, query_result):
-        self._result = query_result
-
-    def scalar_one(self):
-        rows = self._result.result_rows
-        if not rows:
-            raise ValueError("No rows returned")
-        if len(rows) > 1:
-            raise ValueError(f"Expected one row, got {len(rows)}")
-        return rows[0][0]
-
-    def scalar(self):
-        rows = self._result.result_rows
-        if not rows:
-            return None
-        return rows[0][0]
+from .results import RowsResult
 
 
 class ClickHouseAdapter(BaseAdapter):
@@ -38,7 +17,7 @@ class ClickHouseAdapter(BaseAdapter):
         password: str,
         database: str,
     ):
-        super().__init__(session=None)  # type: ignore[arg-type]
+        super().__init__(session=None)
         self._client: Client = clickhouse_connect.get_client(
             host=host,
             port=port,
@@ -51,9 +30,16 @@ class ClickHouseAdapter(BaseAdapter):
         loop = asyncio.get_event_loop()
         return loop.run_in_executor(None, fn)
 
-    async def execute(self, query: str, params: Optional[dict] = None) -> ClickHouseResult:
+    async def get_version(self) -> str:
+        result = await self.execute("SELECT version()")
+        version = result.scalar()
+        if version is None:
+            raise ValueError("No version returned from ClickHouse")
+        return str(version)
+
+    async def execute(self, query: str, params: Optional[dict] = None) -> RowsResult:
         raw = await self._run(lambda: self._client.query(query))
-        return ClickHouseResult(raw)
+        return RowsResult(raw.result_rows)
 
     async def create_or_replace_view(
         self, namespace: str, view_name: str, select_sql: str

@@ -28,6 +28,7 @@ class DatabaseManager:
         self._environment: str = settings.environment
         self._db_type: str = settings.db_config.type
         self._db_config = settings.db_config
+        self._native_adapter: BaseAdapter | None = None
 
         if self._db_type in _NO_SQLALCHEMY_ADAPTERS:
             self._engine = None
@@ -61,6 +62,15 @@ class DatabaseManager:
         logger.info("Database engine initialized environment=%s, db_type=%s", self._environment, self._db_type)
 
     async def close(self) -> None:
+        if self._native_adapter is not None:
+            logger.info(
+                "Closing native adapter environment=%s, db_type=%s",
+                self._environment,
+                self._db_type,
+            )
+            await self._native_adapter.close()
+            self._native_adapter = None
+
         if self._engine:
             logger.info("Disposing database engine environment=%s, db_type=%s", self._environment, self._db_type)
 
@@ -85,6 +95,23 @@ class DatabaseManager:
         return self._db_config
 
     def create_adapter(self, session: AsyncSession | None) -> BaseAdapter:
+        if self._db_type in _NO_SQLALCHEMY_ADAPTERS:
+            if self._native_adapter is None:
+                cfg = self._db_config
+                self._native_adapter = get_adapter(
+                    db_type=self._db_type,
+                    session=None,
+                    host=cfg.host,
+                    port=cfg.port,
+                    username=cfg.username,
+                    password=cfg.password,
+                    database=cfg.database,
+                    odbc_driver=cfg.odbc_driver,
+                    encrypt=cfg.encrypt,
+                    trust_server_certificate=cfg.trust_server_certificate,
+                )
+            return self._native_adapter
+
         cfg = self._db_config
         return get_adapter(
             db_type=self._db_type,
@@ -114,11 +141,8 @@ class DatabaseManager:
                 yield session
             except Exception:
                 logger.exception("Database session error environment=%s, db_type=%s", self._environment, self._db_type)
-
                 await session.rollback()
                 raise
-            finally:
-                await session.close()
 
     def _register_engine_events(self, environment: str, db_type: str) -> None:
         if not self._engine:

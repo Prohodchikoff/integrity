@@ -4,23 +4,7 @@ from typing import Optional
 import duckdb
 
 from .base import BaseAdapter
-
-
-class DuckDBResult:
-    def __init__(self, relation):
-        self._rows = relation.fetchall()
-
-    def scalar_one(self):
-        if not self._rows:
-            raise ValueError("No rows returned")
-        if len(self._rows) > 1:
-            raise ValueError(f"Expected one row, got {len(self._rows)}")
-        return self._rows[0][0]
-
-    def scalar(self):
-        if not self._rows:
-            return None
-        return self._rows[0][0]
+from .results import RowsResult
 
 
 class DuckDBAdapter(BaseAdapter):
@@ -32,14 +16,21 @@ class DuckDBAdapter(BaseAdapter):
         loop = asyncio.get_event_loop()
         return loop.run_in_executor(None, fn)
 
-    async def execute(self, query: str, params: Optional[dict] = None) -> DuckDBResult:
+    async def get_version(self) -> str:
+        result = await self.execute("SELECT version()")
+        version = result.scalar()
+        if version is None:
+            raise ValueError("No version returned from DuckDB")
+        return str(version)
+
+    async def execute(self, query: str, params: Optional[dict] = None) -> RowsResult:
         def _execute():
             if params:
                 return self._conn.execute(query, params)
             return self._conn.execute(query)
 
         raw = await self._run(_execute)
-        return DuckDBResult(raw)
+        return RowsResult(raw.fetchall())
 
     async def create_or_replace_view(
         self, namespace: str, view_name: str, select_sql: str

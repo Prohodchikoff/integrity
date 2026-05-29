@@ -24,7 +24,7 @@ from app.jobs.project_schemas import (
     TestResultItemResponse,
     TestSummaryResponse,
 )
-from app.core.database import db_registry
+from app.core.database import _NO_SQLALCHEMY_ADAPTERS, db_registry
 from app.integrity.runner import load_project_graph, run_project
 from app.integrity.test_runner import planned_test_count, run_project_tests
 
@@ -252,7 +252,8 @@ async def execute_run(
                 _loaded=loaded,
             )
         finally:
-            await adapter.close()
+            if manager.db_type not in _NO_SQLALCHEMY_ADAPTERS:
+                await adapter.close()
 
     return ProjectRunResponse(
         project_name=result.project_name,
@@ -297,7 +298,8 @@ async def execute_test(
                 on_test_result=_on_test_result if job_id else None,
             )
         finally:
-            await adapter.close()
+            if manager.db_type not in _NO_SQLALCHEMY_ADAPTERS:
+                await adapter.close()
 
     total = len(result.tests)
     failed = sum(1 for t in result.tests if not t.ok)

@@ -34,8 +34,8 @@ def projects() -> ProjectsListResponse:
     description="Tests the active adapter connection and returns database type and version.",
 )
 async def test_connection(adapter: DBAdapterDep) -> ConnectionTestResponse:
-    version = await adapter.execute("SELECT version()")
+    version = await adapter.get_version()
     return ConnectionTestResponse(
         database_type=adapter.__class__.__name__,
-        version=version.scalar(),
+        version=version,
     )

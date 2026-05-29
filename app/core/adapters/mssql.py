@@ -4,26 +4,10 @@ from typing import Optional
 import aioodbc
 
 from .base import BaseAdapter
+from .results import RowsResult
 
 DEFAULT_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
 DEFAULT_PORT = 1433
-
-
-class MssqlResult:
-    def __init__(self, rows):
-        self._rows = rows or []
-
-    def scalar_one(self):
-        if not self._rows:
-            raise ValueError("No rows returned")
-        if len(self._rows) > 1:
-            raise ValueError(f"Expected one row, got {len(self._rows)}")
-        return self._rows[0][0]
-
-    def scalar(self):
-        if not self._rows:
-            return None
-        return self._rows[0][0]
 
 
 class MssqlAdapter(BaseAdapter):
@@ -56,7 +40,14 @@ class MssqlAdapter(BaseAdapter):
             self._conn = await aioodbc.connect(dsn=self._dsn, autocommit=False)
         return self._conn
 
-    async def execute(self, query: str, params: Optional[dict] = None) -> MssqlResult:
+    async def get_version(self) -> str:
+        result = await self.execute("SELECT @@VERSION AS version")
+        version = result.scalar()
+        if version is None:
+            raise ValueError("No version returned from MSSQL")
+        return str(version)
+
+    async def execute(self, query: str, params: Optional[dict] = None) -> RowsResult:
         if params:
             raise NotImplementedError("MSSQL adapter does not support named params")
         async with self._lock:
@@ -66,7 +57,7 @@ class MssqlAdapter(BaseAdapter):
                 rows = await cur.fetchall() if cur.description else []
                 if not query.strip().upper().startswith("SELECT"):
                     await conn.commit()
-                return MssqlResult(rows)
+                return RowsResult(rows)
 
     async def create_or_replace_view(
         self, namespace: str, view_name: str, select_sql: str
