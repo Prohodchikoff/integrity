@@ -70,3 +70,30 @@ def build_positive_sql(relation: str, column: str) -> str:
     WHERE {column} IS NOT NULL AND {column} <= 0
     """.strip()
     return stmt
+
+
+def build_relationships_sql(
+    child_relation: str,
+    child_column: str,
+    parent_relation: str,
+    parent_column: str,
+    db_type: str,
+) -> str:
+    child_col = child_column if child_column.startswith(('"', "`", "[")) else _quote_ident(db_type, child_column)
+    parent_col = parent_column if parent_column.startswith(('"', "`", "[")) else _quote_ident(db_type, parent_column)
+    stmt = f"""
+    SELECT c.*
+    FROM {child_relation} c
+    LEFT JOIN {parent_relation} p ON c.{child_col} = p.{parent_col}
+    WHERE c.{child_col} IS NOT NULL AND p.{parent_col} IS NULL
+    """.strip()
+    return stmt
+
+
+def _quote_ident(db_type: str, name: str) -> str:
+    if db_type in {"postgresql", "redshift", "snowflake", "bigquery",
+                   "duckdb", "trino", "oracle", "mssql"}:
+        return f'"{name}"'
+    if db_type in {"mysql", "mariadb", "clickhouse"}:
+        return f"`{name}`"
+    raise ValueError(f"Unsupported db_type for column quoting: {db_type!r}")

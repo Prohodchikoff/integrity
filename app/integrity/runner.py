@@ -7,8 +7,10 @@ from app.core.adapters.base import BaseAdapter
 from app.integrity.compiler import compile_sql
 from app.integrity.dag import topological_order
 from app.integrity.project import discover_model_paths, load_project_file
-from app.integrity.refs import extract_ref_names, validate_refs
+from app.integrity.refs import extract_ref_names, extract_source_refs, validate_refs, validate_sources
 from app.integrity.relation import quoted_relation
+from app.integrity.source_resolver import make_source_resolver
+from app.integrity.sources import source_index
 from app.settings import Settings, get_settings
 
 
@@ -69,6 +71,8 @@ def load_project_graph(project_root: Path) -> LoadedProject:
     meta = load_project_file(root)
     paths = discover_model_paths(root, meta.models_dir)
     known = set(paths)
+    sources = source_index(meta.sources)
+    source_tables = {name: set(src.tables) for name, src in sources.items()}
 
     raw_sql: dict[str, str] = {}
     graph: dict[str, set[str]] = {}
@@ -78,6 +82,7 @@ def load_project_graph(project_root: Path) -> LoadedProject:
         raw_sql[name] = raw
         refs = extract_ref_names(raw)
         errs = validate_refs(name, refs, known)
+        errs.extend(validate_sources(name, extract_source_refs(raw), source_tables))
         if errs:
             raise ValueError("; ".join(errs))
         graph[name] = set(refs)
@@ -124,6 +129,9 @@ async def run_project(
     loaded = _loaded or load_project_graph(project_root)
     order = topological_order(loaded.graph)
     known = set(loaded.paths)
+    meta = load_project_file(project_root.resolve())
+    sources = source_index(meta.sources)
+    source_cb = make_source_resolver(db_type, namespace, sources)
 
     results: list[RunModelResult] = []
 
@@ -135,7 +143,7 @@ async def run_project(
     for name in order:
         t0 = time.perf_counter()
         try:
-            compiled = compile_sql(loaded.raw_sql[name], ref_cb)
+            compiled = compile_sql(loaded.raw_sql[name], ref_cb, source_cb)
             await adapter.create_or_replace_view(namespace, name, compiled)
         except Exception as e:
             elapsed_ms = (time.perf_counter() - t0) * 1000

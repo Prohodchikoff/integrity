@@ -5,8 +5,10 @@ from typing import Awaitable, Callable
 from app.core.adapters.base import BaseAdapter
 from app.integrity.project import (
     BUILTIN_INTEGRITY_TESTS,
+    RELATIONSHIPS_TEST_PREFIX,
     discover_model_paths,
     load_project_file,
+    parse_relationships_test,
 )
 from app.integrity.relation import quoted_relation
 from app.integrity.runner import execution_namespace
@@ -14,6 +16,7 @@ from app.integrity.test_compiler import (
     build_not_blank_sql,
     build_not_null_sql,
     build_positive_sql,
+    build_relationships_sql,
     build_unique_sql,
     render_user_test,
 )
@@ -109,7 +112,7 @@ async def run_project_tests(
                 f"Test config references unknown model {model_name!r}. "
                 "Define model SQL file first."
             )
-        relation = quoted_relation(db_type, namespace, model_name)
+        child_relation = quoted_relation(db_type, namespace, model_name)
 
         for column_cfg in model_cfg.columns:
             column_name = column_cfg.name
@@ -119,8 +122,25 @@ async def run_project_tests(
                 try:
                     if test_name in BUILTIN_INTEGRITY_TESTS:
                         sql = _build_builtin_sql(
-                            test_name, relation, column_name, db_type
+                            test_name, child_relation, column_name, db_type
                         )
+                    elif test_name.startswith(RELATIONSHIPS_TEST_PREFIX):
+                        parent_model, parent_field = parse_relationships_test(test_name)
+                        if parent_model not in known_models:
+                            raise ValueError(
+                                f"relationships parent model {parent_model!r} is not defined"
+                            )
+                        parent_relation = quoted_relation(db_type, namespace, parent_model)
+                        child_col = _quote_column(db_type, column_name)
+                        parent_col = _quote_column(db_type, parent_field)
+                        sql = build_relationships_sql(
+                            child_relation,
+                            child_col,
+                            parent_relation,
+                            parent_col,
+                            db_type,
+                        )
+                        type_label = f"relationships:{parent_model}:{parent_field}"
                     else:
                         path = _resolve_test_file(
                             root, project.tests_dir, test_name
@@ -129,7 +149,7 @@ async def run_project_tests(
                         quoted = _quote_column(db_type, column_name)
                         sql = render_user_test(
                             raw_tpl,
-                            relation=relation,
+                            relation=child_relation,
                             column=quoted,
                             column_name=column_name,
                             db_type=db_type,
