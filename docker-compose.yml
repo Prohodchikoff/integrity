@@ -1,0 +1,129 @@
+name: integrity
+
+x-api-env: &api-env
+  JOB_DATABASE_URL: mysql+aiomysql://integrity:integrity@mysql-jobs:3306/jobs
+  INTEGRITY_ENV: docker
+  INTEGRITY_PROJECT: adventure
+
+services:
+  mysql-jobs:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: jobs
+      MYSQL_USER: integrity
+      MYSQL_PASSWORD: integrity
+    ports:
+      - "${MYSQL_JOBS_PORT:-3307}:3306"
+    volumes:
+      - mysql-jobs-data:/var/lib/mysql
+      - ./docker/init/mysql-jobs:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "127.0.0.1",
+          "-uintegrity",
+          "-pintegrity",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  mssql-bak-fetch:
+    image: curlimages/curl:8.5.0
+    user: "0:0"
+    volumes:
+      - mssql-backup:/backup
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /backup
+        chmod 777 /backup
+        if [ -s /backup/AdventureWorks2014.bak ]; then
+          echo "AdventureWorks2014.bak already cached, skipping download."
+          chmod 644 /backup/AdventureWorks2014.bak
+          exit 0
+        fi
+        rm -f /backup/AdventureWorks2014.bak
+        echo "Downloading AdventureWorks2014.bak (may take several minutes)..."
+        curl -fSL --retry 3 --retry-delay 10 \
+          -o /backup/AdventureWorks2014.bak \
+          "https://github.com/Microsoft/sql-server-samples/releases/download/adventureworks/AdventureWorks2014.bak"
+        chmod 644 /backup/AdventureWorks2014.bak
+    restart: "no"
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql-bak-fetch:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: Developer
+    # Fixed host port (not from .env) — avoids clash with local SQL Server on 1433.
+    ports:
+      - "127.0.0.1:14330:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+      - mssql-backup:/var/opt/mssql/backup
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -C -Q 'SELECT 1' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  mssql-restore:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql:
+        condition: service_healthy
+      mssql-bak-fetch:
+        condition: service_completed_successfully
+    environment:
+      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_HOST: mssql
+    volumes:
+      - mssql-backup:/var/opt/mssql/backup
+      - ./docker/mssql-restore.sh:/restore.sh:ro
+    entrypoint: ["/bin/bash", "/restore.sh"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_MSSQL: "true"
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      <<: *api-env
+    volumes:
+      - ./app/config/environments.yaml:/app/app/config/environments.yaml:ro
+    depends_on:
+      mysql-jobs:
+        condition: service_healthy
+      mssql:
+        condition: service_healthy
+      mssql-restore:
+        condition: service_completed_successfully
+
+volumes:
+  mysql-jobs-data:
+  mssql-data:
+  mssql-backup:

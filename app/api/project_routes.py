@@ -40,7 +40,7 @@ def projects_parse(body: ProjectPathBody):
     return ProjectParseResponse(
         project_name=r.project_name,
         order=list(r.order),
-        models=[ParsedModelInfoResponse.model_vaget_joblidate(m) for m in r.models],
+        models=[ParsedModelInfoResponse.model_validate(m) for m in r.models],
     )
 
 

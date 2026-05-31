@@ -1,0 +1,66 @@
+name: adventure
+models_dir: models
+tests_dir: tests
+
+tests:
+  - model: stg_person
+    columns:
+      - name: person_id
+        list_tests:
+          - not_null
+          - unique
+
+      - name: first_name
+        list_tests:
+          - not_blank
+
+      - name: last_name
+        list_tests:
+          - not_blank
+
+      - name: person_type
+        list_tests:
+          - not_null
+          - test_person_type_valid
+
+      - name: rowguid
+        list_tests:
+          - unique
+
+      - name: modified_date
+        list_tests:
+          - not_null
+
+  - model: int_person_clean
+    columns:
+      - name: person_id
+        list_tests:
+          - not_null
+          - unique
+
+      - name: full_name
+        list_tests:
+          - not_null
+
+      - name: name_style_label
+        list_tests:
+          - not_null
+
+  - model: dim_person
+    columns:
+      - name: person_id
+        list_tests:
+          - unique
+          - not_null
+
+      - name: full_name
+        list_tests:
+          - not_null
+
+      - name: person_type
+        list_tests:
+          - not_null
+
+      - name: name_style_label
+        list_tests:
+          - not_null
